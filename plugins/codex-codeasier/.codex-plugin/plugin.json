@@ -1,0 +1,38 @@
+{
+  "name": "codex-codeasier",
+  "version": "0.1.1",
+  "description": "Evidence-driven repository workflows for OpenAI Codex",
+  "author": {
+    "name": "Codeasier",
+    "url": "https://github.com/codeasier"
+  },
+  "homepage": "https://github.com/codeasier/codex-codeasier#readme",
+  "repository": "https://github.com/codeasier/codex-codeasier",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "github",
+    "issues",
+    "pull-requests",
+    "specifications",
+    "worktrees"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codeasier",
+    "shortDescription": "Evidence-driven repository workflows",
+    "longDescription": "Review and resolve issues, follow up on pull requests, govern documentation, prepare releases, and execute specification-driven repository work.",
+    "developerName": "Codeasier",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/codeasier/codex-codeasier",
+    "defaultPrompt": [
+      "Review a GitHub issue and verify whether it is valid.",
+      "Resolve one repository issue in an isolated worktree.",
+      "Create an implementation-ready specification package."
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "codex-codeasier",
+  "interface": {
+    "displayName": "Codeasier"
+  },
+  "plugins": [
+    {
+      "name": "codex-codeasier",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-codeasier"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
