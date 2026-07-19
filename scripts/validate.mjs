@@ -47,6 +47,38 @@ function expectFields(subject, actual, expected) {
   }
 }
 
+let workflowSourceLock;
+try {
+  workflowSourceLock = JSON.parse(
+    await readFile(join(root, "workflow-source.lock.json"), "utf8"),
+  );
+} catch (error) {
+  fail(`cannot parse workflow source lock: ${error.message}`);
+}
+
+if (
+  typeof workflowSourceLock !== "object" ||
+  workflowSourceLock === null ||
+  Array.isArray(workflowSourceLock)
+) {
+  fail("workflow source lock must be an object");
+} else {
+  expectFields("workflow source lock", workflowSourceLock, {
+    repository: "codeasier/open-codeasier",
+    generator: "scripts/generate-workflows.mjs",
+  });
+  if (!/^[0-9a-f]{40}$/.test(workflowSourceLock.commit ?? "")) {
+    fail("workflow source lock commit must be a full lowercase commit SHA");
+  }
+  const expectedLockFields = ["commit", "generator", "repository"];
+  const actualLockFields = Object.keys(workflowSourceLock).sort();
+  if (JSON.stringify(actualLockFields) !== JSON.stringify(expectedLockFields)) {
+    fail(
+      `workflow source lock fields must be exactly: ${expectedLockFields.join(", ")}`,
+    );
+  }
+}
+
 let pluginRoot = resolve(root, expectedSource);
 let marketplace;
 try {

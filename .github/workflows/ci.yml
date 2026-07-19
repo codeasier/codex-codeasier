@@ -12,7 +12,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - id: workflow-source
+        name: Read workflow source lock
+        run: |
+          node scripts/validate.mjs
+          echo "commit=$(node -p 'require("./workflow-source.lock.json").commit')" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned workflow source
+        uses: actions/checkout@v4
+        with:
+          repository: codeasier/open-codeasier
+          ref: ${{ steps.workflow-source.outputs.commit }}
+          path: .workflow-source/open-codeasier
+          persist-credentials: false
+      - name: Verify generated workflows
+        run: |
+          node .workflow-source/open-codeasier/scripts/check-workflows.mjs \
+            --platform codex \
+            --source .workflow-source/open-codeasier \
+            --target .
       - run: node scripts/validate.mjs
