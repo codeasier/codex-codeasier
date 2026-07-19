@@ -1,0 +1,5 @@
+{
+  "repository": "codeasier/open-codeasier",
+  "commit": "32fc8f695a10de14db3363205c34bc1830b9aad2",
+  "generator": "scripts/generate-workflows.mjs"
+}
