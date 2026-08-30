@@ -8,6 +8,7 @@ const pluginName = "codex-codeasier";
 const expectedSource = "./plugins/codex-codeasier";
 const expectedSkills = [
   "docs-governance",
+  "handoff",
   "issue-resolve",
   "issue-review",
   "issue-submit",
@@ -142,7 +143,7 @@ try {
 if (manifest) {
   expectFields("plugin manifest", manifest, {
     name: pluginName,
-    version: "0.1.1",
+    version: "0.2.0",
     description: "Evidence-driven repository workflows for OpenAI Codex",
     homepage: "https://github.com/codeasier/codex-codeasier#readme",
     repository: "https://github.com/codeasier/codex-codeasier",
@@ -162,7 +163,7 @@ if (manifest) {
     displayName: "Codeasier",
     shortDescription: "Evidence-driven repository workflows",
     longDescription:
-      "Review and resolve issues, follow up on pull requests, govern documentation, prepare releases, and execute specification-driven repository work.",
+      "Review and resolve issues, follow up on pull requests, govern documentation, prepare releases, execute specification-driven repository work, and transfer active tasks between sessions.",
     developerName: "Codeasier",
     category: "Developer Tools",
     websiteURL: "https://github.com/codeasier/codex-codeasier",

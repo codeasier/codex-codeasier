@@ -86,6 +86,7 @@ Natural-language requests such as `Use issue-review for issue 42` also work, but
 | Skill | Purpose |
 | --- | --- |
 | `docs-governance` | Audit or fix documentation structure, links, localization, and repository consistency. |
+| `handoff` | Create or load a project handoff for transferring an active agent task between sessions. |
 | `issue-resolve` | Resolve one repository issue safely in an isolated Git worktree. |
 | `issue-review` | Analyze whether one issue is real and reasonable, then post an evidence-based review comment. |
 | `issue-submit` | Discover a remote repository's issue templates and submit a confirmed issue. |

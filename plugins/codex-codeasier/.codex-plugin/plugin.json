@@ -1,6 +1,6 @@
 {
   "name": "codex-codeasier",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Evidence-driven repository workflows for OpenAI Codex",
   "author": {
     "name": "Codeasier",
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Codeasier",
     "shortDescription": "Evidence-driven repository workflows",
-    "longDescription": "Review and resolve issues, follow up on pull requests, govern documentation, prepare releases, and execute specification-driven repository work.",
+    "longDescription": "Review and resolve issues, follow up on pull requests, govern documentation, prepare releases, execute specification-driven repository work, and transfer active tasks between sessions.",
     "developerName": "Codeasier",
     "category": "Developer Tools",
     "capabilities": [
