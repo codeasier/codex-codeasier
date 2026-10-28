@@ -2,6 +2,8 @@
 
 Use the live tool schemas as the authority for optional fields. All tools are namespaced with `gitcode_`, use explicit `owner` and `repo` arguments, and enforce the server's repository allowlist. Issue tools use `issue_number`; PR tools use `pull_number`.
 
+In OAuth mode, each tool call uses the GitCode authorization belonging to that MCP connection. It cannot fall back to a shared PAT. The configured repository allowlist still applies, and reads require the grant's `gitcode:read` scope.
+
 ## Repository reads
 
 | Tool | Result |
@@ -38,7 +40,7 @@ Use the live tool schemas as the authority for optional fields. All tools are na
 
 ## Write operations
 
-These operations require server write mode, sufficient GitCode permissions, and the applicable client/user authorization. They are not implied by a read-only investigation.
+These operations require server write mode, sufficient GitCode permissions, and the applicable client/user authorization. OAuth connections also require `gitcode:write`. Enabling server write mode or refreshing tool schemas does not expand an existing read-only grant: reconnect or repeat OAuth authorization for the extra scope. Writes are not implied by a read-only investigation.
 
 | Tool | Effect |
 | --- | --- |

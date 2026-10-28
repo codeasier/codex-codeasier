@@ -1,80 +1,144 @@
 # Deploy GitCode MCP
 
-The source can run as a local stdio process, behind Secure MCP Tunnel, or as a controlled Streamable HTTP service. Deployment is separate from installing the marketplace package.
+For a cloud server, deploy Streamable HTTP behind a public HTTPS reverse proxy and enable the GitCode OAuth broker. ChatGPT connects directly to `https://YOUR_DOMAIN/mcp`. Marketplace installation and server deployment remain separate operations.
 
-The GitCode HTTP adapter connects directly to the fixed `https://api.gitcode.com/api/v5/` origin and does not follow redirects or read environment proxy settings. Provide direct network egress from the host. Proxy settings for OpenAI's separate tunnel client do not configure the GitCode adapter.
+The GitCode adapter connects to the fixed `https://api.gitcode.com/api/v5/` origin. OAuth also needs `https://gitcode.com/oauth/authorize` and `/oauth/token`. The server does not follow upstream redirects or use environment proxy settings; provide direct GitCode egress from the host.
 
-## Private stdio service for dot
+## Public HTTPS with GitCode OAuth
 
-Use [Connect dot](connect-dot.md). Run the installed `gitcode-mcp` as the child command of `tunnel-client` on a persistent host. Supply `GITCODE_TOKEN`/`GC_TOKEN` and the OpenAI tunnel runtime key through your service manager's secret delivery. Keep the service's profile and working directory accessible to its service account.
+### Configure the service
 
-This is the default recommendation for private dot use: it needs no public listener and keeps upstream credentials on the host. A service restart must stop the previous stdio tunnel instance before starting another instance for the same tunnel ID.
+Follow [OAuth setup](oauth.md) to create the upstream GitCode application, the independent downstream MCP client credentials and a persistent encryption key. Store the real environment file outside the repository with mode `0600`.
 
-## Streamable HTTP on the host
+Use [`compose.oauth.yaml`](../../deploy/gitcode-mcp/compose.oauth.yaml) as a **standalone** Compose file. Do not combine it with `compose.yaml`: the legacy file supplies PAT/static-bearer variables that OAuth mode rejects.
 
-After [installing the runtime](setup.md), start an HTTP MCP endpoint bound to loopback:
+From the repository root:
+
+```bash
+docker compose \
+  --env-file /absolute/path/to/private/gitcode-oauth.env \
+  -f deploy/gitcode-mcp/compose.oauth.yaml \
+  up --build -d
+```
+
+The service:
+
+- Runs as UID/GID `10001:10001` with a read-only root filesystem.
+- Publishes only `127.0.0.1:8765` on the host.
+- Stores encrypted OAuth credentials and persistent grant state in the `oauth-data` volume at `/var/lib/gitcode-mcp`.
+- Uses `/var/lib/gitcode-mcp/oauth.sqlite3` as its database.
+- Starts in read-only mode unless explicitly configured otherwise.
+- Restarts automatically according to the Compose restart policy.
+
+The Docker image creates the data directory with ownership for UID 10001. If replacing the named volume with an existing bind mount, give that directory the same ownership and restrict its permissions. SQLite also needs to create its journal files in that directory.
+
+The encryption key is supplied separately from the data volume. Preserve both across upgrades and restarts. Use a single worker/service instance; this deployment does not support multiple replicas sharing its SQLite database.
+
+For a Python installation instead of Docker, install from this checkout into a Python 3.11+ virtual environment, provide the same OAuth variables through the service manager and start:
 
 ```bash
 gitcode-mcp --transport streamable-http --host 127.0.0.1 --port 8765
 ```
 
-The endpoint is `http://127.0.0.1:8765/mcp`. Use MCP Inspector with Streamable HTTP to inspect it. This is an MCP endpoint, not a REST health page; opening it in a browser is not a meaningful tool-call check.
+The service account must be able to write its configured database directory. Configure process supervision and startup recovery in the host's existing service manager.
 
-Set a separate `GITCODE_MCP_HTTP_TOKEN` to require `Authorization: Bearer ...` for HTTP access. It must contain at least 32 characters and differ from the GitCode token. Binding to a non-loopback address requires this token. The GitCode API token and HTTP bearer token serve different purposes.
+### Configure HTTPS
 
-HTTP Host validation defaults to `127.0.0.1:*`, `localhost:*`, and `[::1]:*`. If an approved gateway forwards a different Host, configure `GITCODE_MCP_ALLOWED_HOSTS` for that deployment's exact hosts instead of disabling validation.
+[`nginx.oauth.conf.example`](../../deploy/gitcode-mcp/nginx.oauth.conf.example) provides a dedicated virtual host and rate-limit zones. Include the file exactly once from the existing Nginx `http {}` context, such as through an existing `conf.d/*.conf` include. It is not a complete `nginx.conf`: do not paste it inside a `server` or `location` block, and do not add a nested `http {}` wrapper when installing it into `conf.d`. Replace the example domain and certificate paths, configure DNS and a valid TLS certificate, then run `nginx -t` before reloading.
 
-For a network-facing deployment, terminate TLS at a trusted gateway and enforce that deployment's access policy. If using mTLS, configure certificates and verification at the gateway or tunnel. This repository does not implement OAuth discovery, an OAuth authorization server, or client-certificate verification in the Python HTTP listener. Do not describe a bearer-protected endpoint as a working ChatGPT OAuth integration.
+The reverse proxy forwards `/mcp`, the OAuth endpoints and discovery metadata to `http://127.0.0.1:8765` without rewriting paths. Leave the backend port private. The example assumes Nginx runs on the host; a containerized proxy needs an explicit private Docker network because its `127.0.0.1` is not the host.
 
-## Docker
+Match `GITCODE_MCP_PUBLIC_URL`, the proxy's fixed Host and `GITCODE_MCP_ALLOWED_HOSTS` to the same public origin. Configure `GITCODE_MCP_ALLOWED_ORIGINS` explicitly. Host and Origin are separate checks: changing the Host allowlist does not authorize an arbitrary browser Origin. If an inspection client sends an additional Origin, add that exact intended value rather than disabling validation.
 
-The Compose configuration builds the package from this checkout. It runs as an unprivileged user, publishes only a loopback host port, and requires an HTTP bearer token because the process binds to the container's network interface.
+The application derives OAuth endpoints from the configured public origin. The proxy overwrites forwarded headers, and only a proxy under your control should be trusted to supply them. Do not add a public reverse proxy that supplies a shared internal bearer token to unauthenticated callers.
 
-Supply credentials in the environment without literal secrets in command arguments:
+The sample applies per-source-IP limits only to `/authorize`, `/oauth/start` and `/token`. The first two share a 10-request/minute zone with a burst of 10; `/token` has a separate 30-request/minute zone with a burst of 20. Excess requests receive HTTP 429 without waiting. These are starting values for a personal deployment: clients behind a shared NAT can share an IP, so size the limits for legitimate use. `/mcp`, discovery, the GitCode callback, consent and revocation do not receive these particular limits. If a trusted load balancer sits before Nginx, configure real-IP handling only for that trusted proxy; do not key limits directly on arbitrary forwarded headers.
+
+The application separately caps pending authorization records at 256 and total persistent records at 10,000. The smaller pending limit prevents abandoned unauthenticated flows from consuming the entire credential store. Excess new work is rejected rather than evicting valid grants; expired records are cleaned up. These bounds complement edge limits, not a guarantee against a distributed denial of service. Monitor rejected requests with sanitized counters, and investigate sustained saturation instead of disabling the bounds.
+
+Keep OAuth routes uncached. `access_log off` does **not** control Nginx error logs: upstream failures, limit messages, inherited debug settings and other modules can include a request line with callback `code`/`state`. The example explicitly sets its dedicated error sink to `crit` and rate-limit messages to `notice`, reducing routine request logging instead of inheriting an `info`/`debug` configuration. This still does not guarantee that every diagnostic is free of query values.
+
+The sample file sink can retain raw critical-error context: restrict its readers, retention and rotated-file permissions. For redaction before any disk storage, replace that file sink with a trusted local syslog collector that removes query strings, authorization/cookie headers and request bodies before writing or exporting them. Redacting an already-written file only when forwarding it does not remove the original. Where safe collection cannot be assured, discard raw error output for these OAuth routes and use sanitized application errors/counters. Review effective `error_log`, `debug_connection`, CDN and WAF settings locally before enabling real accounts. Do not enable raw request debugging with production credentials.
+
+The application does not need a client certificate issued by your private CA for this OAuth flow. See Nginx's [request-limit directives](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html) and [error-log settings](https://nginx.org/en/docs/ngx_core_module.html#error_log) for configuration contexts and inheritance.
+
+### Complete account linking
+
+An empty `GITCODE_MCP_OAUTH_REDIRECT_URIS` is a discovery-only bootstrap: the service starts but refuses authorization callbacks. Use it to begin creating the ChatGPT connection and obtain its actual callback URL. Add that exact HTTPS URL to the allowlist, recreate/restart the service, then complete [ChatGPT linking and installation](connect-dot.md).
+
+Discovery must be public. Protected MCP requests require this service's OAuth access token. A generic browser-cookie login proxy, static API key or GitCode PAT is not a substitute for that authorization flow.
+
+### Operate and upgrade
+
+Use the same environment file and Compose file for subsequent operations:
 
 ```bash
-read -r -s -p 'GitCode token: ' GITCODE_TOKEN
-export GITCODE_TOKEN
-read -r -s -p 'HTTP MCP bearer token (32+ characters): ' GITCODE_MCP_HTTP_TOKEN
-export GITCODE_MCP_HTTP_TOKEN
-export GITCODE_MCP_ALLOWED_REPOS='owner/repository'
-export GITCODE_MCP_READ_ONLY=true
+docker compose \
+  --env-file /absolute/path/to/private/gitcode-oauth.env \
+  -f deploy/gitcode-mcp/compose.oauth.yaml \
+  logs --tail=50
+```
+
+After changing a secret file or environment setting, recreate the container; a plain restart does not load changed Compose environment values:
+
+```bash
+docker compose \
+  --env-file /absolute/path/to/private/gitcode-oauth.env \
+  -f deploy/gitcode-mcp/compose.oauth.yaml \
+  up --build -d --force-recreate
+```
+
+Record the deployed commit before upgrading. Back up the SQLite database consistently together with its grant state, keep a separate protected copy of its encryption key, and retain the previous image/commit for rollback. Stop the service during a simple file-level database backup so SQLite journal state is consistent. Do not use `down -v` when stopping a deployment whose authorizations must survive.
+
+Changing the encryption key under an existing database invalidates its stored credentials. This release does not provide an in-place encryption-key rotation command. Plan account reconnection when replacing lost state or keys.
+
+MCP access tokens last at most 15 minutes; a grant's fixed maximum lifetime is 30 days. Account reconnects and upstream revocation can still be necessary. After enabling write mode, refresh tool metadata and reconnect or repeat OAuth authorization for `gitcode:write`; refreshing a read-only grant cannot broaden its scopes.
+
+## Verify the actual deployment
+
+1. From outside the server, verify DNS, the certificate and OAuth discovery at the final HTTPS origin.
+2. Confirm an unauthenticated MCP request receives the OAuth challenge.
+3. Complete authorization with an allowed GitCode account, including the MCP service's consent step.
+4. Use a real MCP client against the HTTPS URL to initialize, list tools and call `gitcode_get_repository` on an allowed repository.
+5. Call `gitcode_get_clone_info` and verify credential-free clone URLs.
+6. Confirm invalid/expired tokens, disallowed identities, missing write scope and out-of-allowlist repositories are rejected.
+7. Check that a service restart preserves authorizations with the same database and encryption key.
+8. Repeat a read through the installed ChatGPT connection.
+
+Keep this acceptance read-only; do not create an issue or PR solely to prove deployment. Test actual mutations only when the user authorizes a specific operation.
+
+`python -m gitcode_mcp.smoke` exercises **stdio**, not the HTTPS/OAuth path. Mocked HTTP tests, a running container or a successful HTTP GET do not establish a live GitCode or ChatGPT connection. This repository's implementation work has not registered a real GitCode OAuth application or completed account-level ChatGPT linking.
+
+## Existing PAT and static-bearer mode
+
+The default `GITCODE_MCP_AUTH_MODE=bearer` preserves the existing stdio/PAT workflow and controlled HTTP clients. It uses one configured GitCode account per process.
+
+For HTTP, install the runtime and supply `GITCODE_TOKEN` (or `GC_TOKEN`) plus a separate `GITCODE_MCP_HTTP_TOKEN`:
+
+```bash
+gitcode-mcp --transport streamable-http --host 127.0.0.1 --port 8765
+```
+
+The endpoint is `http://127.0.0.1:8765/mcp`. The HTTP bearer secret must have at least 32 characters and differ from the GitCode token. It is required for non-loopback HTTP binding in this mode.
+
+The original [`compose.yaml`](../../deploy/gitcode-mcp/compose.yaml) remains available:
+
+```bash
 docker compose -f deploy/gitcode-mcp/compose.yaml up --build -d
 ```
 
-The host endpoint remains `http://127.0.0.1:8765/mcp`. Configure its bearer token in the inspecting client's secure authentication settings. Avoid commands that dump the resolved Compose environment into logs.
+Supply its secrets through the process environment or a private environment file. It also publishes only loopback port 8765 and defaults to read-only mode. Do not run both deployment variants on that same host port.
 
-Inspect startup and stop the service with:
+Static-bearer mode does not perform GitCode user authorization and is not this project's public ChatGPT OAuth route. Its single PAT must not be shared as though it represented distinct users.
 
-```bash
-docker compose -f deploy/gitcode-mcp/compose.yaml logs --tail=50
-docker compose -f deploy/gitcode-mcp/compose.yaml down
-```
+## Optional private stdio tunnel
 
-Changing a shell environment variable does not change a running container. Recreate it with the intended configuration. Enabling writes requires `GITCODE_MCP_READ_ONLY=false` and sufficient upstream permissions; it does not remove the client's approval controls.
-
-## Verify a deployment
-
-1. Confirm that the process starts and the MCP client can list tools.
-2. Call `gitcode_get_repository` on an allowed repository and verify the identity of the returned repository.
-3. Call `gitcode_get_clone_info`; verify that neither clone URL contains a credential.
-4. Confirm an out-of-allowlist repository is rejected before it reaches GitCode.
-5. Confirm read-only mode denies a write without changing remote state.
-6. For dot, repeat the read through the installed custom MCP connection. Local tests and a successful container start do not establish that step.
-
-Use a dedicated test repository for any explicitly authorized write verification. Check remote state before retrying a write after a timeout.
-
-## Upgrades and scope
-
-Install or rebuild the updated package, restart the process, and refresh tool metadata in the relevant ChatGPT connection. Existing client sessions may retain old schemas until refreshed or reopened.
-
-This service is configured for one upstream GitCode credential per process. Repository restrictions reduce its accessible scope, but do not create per-user GitCode identities. For a shared multi-user deployment, implement per-user credential binding and an appropriate MCP OAuth layer before exposing a shared service. A private single-account tunnel should remain limited to its intended account/workspace.
+For environments that explicitly choose a private outbound tunnel, follow [the separate tunnel guide](connect-tunnel.md). Use the default PAT/stdio mode and its own host credentials. The public OAuth deployment above does not use `tunnel-client`, a tunnel ID or `CONTROL_PLANE_API_KEY`.
 
 ## Official references
 
-- [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 - [Add custom MCP server](https://developers.openai.com/api/docs/guides/custom-mcp-server)
 - [Plugin authentication](https://developers.openai.com/plugins/build/auth)
-- [Package your plugin](https://developers.openai.com/plugins/build/plugins)
-- [GitCode personal access tokens](https://docs.gitcode.com/docs/help/home/user_center/security_management/user_pat/)
 - [GitCode OAuth](https://docs.gitcode.com/docs/apis/oauth/)
+- [GitCode token API](https://docs.gitcode.com/docs/apis/post-oauth-token-grant-type-authorization-code-code-code-client-id-client-id-client-secret-client-secret/)
+- [GitCode personal access tokens](https://docs.gitcode.com/docs/help/home/user_center/security_management/user_pat/)

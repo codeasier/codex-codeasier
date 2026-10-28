@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import anyio
 from mcp import types
@@ -19,6 +20,9 @@ from .api import GitCodeAPI, GitCodeError
 from .config import ConfigurationError, Settings
 from .tools import GitCodeTools
 
+if TYPE_CHECKING:
+    from .oauth import GitCodeOAuthProvider
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,27 +34,94 @@ def result(payload: dict[str, Any], *, error: bool = False) -> types.CallToolRes
     )
 
 
-def create_server(settings: Settings, *, api: GitCodeAPI) -> Server:
+def create_server(
+    settings: Settings,
+    *,
+    api: GitCodeAPI,
+    oauth_provider: GitCodeOAuthProvider | None = None,
+    api_factory: Callable[[str], GitCodeAPI] | None = None,
+) -> Server:
     """Create a server. The caller owns and closes the API client."""
     catalog = GitCodeTools(
         api, allowed_repositories=settings.allowed_repositories, read_only=settings.read_only
     )
     limiter = anyio.CapacityLimiter(8)
+    if bool(settings.oauth) != bool(oauth_provider):
+        raise ConfigurationError("OAuth mode requires a matching request authentication provider.")
+
+    def current_catalog() -> GitCodeTools:
+        if oauth_provider is None:
+            return catalog
+        from mcp.server.auth.middleware.auth_context import get_access_token
+
+        identity = get_access_token()
+        return GitCodeTools(
+            api,
+            allowed_repositories=settings.allowed_repositories,
+            read_only=settings.read_only
+            or identity is None
+            or "gitcode:write" not in identity.scopes,
+        )
 
     async def list_tools(_context: Any, params: Any) -> types.ListToolsResult:
         # All tools fit in one catalog page. Do not silently accept arbitrary cursors.
         if params is not None and params.cursor:
             return types.ListToolsResult(tools=[])
-        return types.ListToolsResult(tools=catalog.list_tools())
+        tools = current_catalog().list_tools()
+        if oauth_provider is not None:
+            for tool in tools:
+                required = ["gitcode:read"]
+                if not tool.annotations.read_only_hint:
+                    required.append("gitcode:write")
+                tool.meta = {
+                    **(tool.meta or {}),
+                    "securitySchemes": [{"type": "oauth2", "scopes": required}],
+                }
+        return types.ListToolsResult(tools=tools)
 
     async def call_tool(_context: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+        identity = None
         try:
-            payload = await anyio.to_thread.run_sync(
-                catalog.call, params.name, params.arguments or {}, limiter=limiter
-            )
+            if oauth_provider is None:
+                payload = await anyio.to_thread.run_sync(
+                    catalog.call, params.name, params.arguments or {}, limiter=limiter
+                )
+            else:
+                from mcp.server.auth.middleware.auth_context import get_access_token
+
+                identity = get_access_token()
+                upstream_token = await oauth_provider.upstream_access_token(identity)
+
+                def authenticated_call() -> dict[str, Any]:
+                    request_api = (
+                        api_factory(upstream_token)
+                        if api_factory
+                        else GitCodeAPI(
+                            upstream_token,
+                            timeout=settings.timeout,
+                            max_response_bytes=settings.max_response_bytes,
+                        )
+                    )
+                    with request_api:
+                        request_catalog = GitCodeTools(
+                            request_api,
+                            allowed_repositories=settings.allowed_repositories,
+                            read_only=settings.read_only or "gitcode:write" not in identity.scopes,
+                        )
+                        return request_catalog.call(params.name, params.arguments or {})
+
+                payload = await anyio.to_thread.run_sync(authenticated_call, limiter=limiter)
             return result(payload)
         except GitCodeError as exc:
-            return result({"error": exc.to_dict()}, error=True)
+            response = result({"error": exc.to_dict()}, error=True)
+            if oauth_provider is not None and exc.code in {
+                "authentication_required",
+                "authentication_failed",
+            }:
+                if identity is not None and exc.code == "authentication_failed":
+                    await oauth_provider.revoke_token(identity)
+                response.meta = {"mcp/www_authenticate": [oauth_provider.challenge]}
+            return response
         except Exception as exc:
             # Exception strings, request arguments and tracebacks may contain credentials or bodies.
             logger.error("GitCode tool failed (%s)", type(exc).__name__)
@@ -100,9 +171,31 @@ class BearerMiddleware:
         await self.app(scope, receive, send)
 
 
-def create_http_app(server: Server, settings: Settings, host: str = "127.0.0.1") -> ASGIApp:
-    if host not in {"127.0.0.1", "localhost", "::1"} and not settings.http_token:
+def create_http_app(
+    server: Server,
+    settings: Settings,
+    host: str = "127.0.0.1",
+    *,
+    oauth_provider: GitCodeOAuthProvider | None = None,
+) -> ASGIApp:
+    if bool(settings.oauth) != bool(oauth_provider):
+        raise ConfigurationError("OAuth mode requires a matching request authentication provider.")
+    if (
+        host not in {"127.0.0.1", "localhost", "::1"}
+        and not settings.http_token
+        and not oauth_provider
+    ):
         raise ConfigurationError("Binding HTTP beyond loopback requires GITCODE_MCP_HTTP_TOKEN.")
+    oauth_options: dict[str, Any] = {}
+    if oauth_provider:
+        from mcp.server.auth.provider import ProviderTokenVerifier
+
+        oauth_options = {
+            "auth": oauth_provider.auth_settings,
+            "auth_server_provider": oauth_provider,
+            "token_verifier": ProviderTokenVerifier(oauth_provider),
+            "custom_starlette_routes": oauth_provider.routes(),
+        }
     app = server.streamable_http_app(
         streamable_http_path="/mcp",
         stateless_http=True,
@@ -112,7 +205,12 @@ def create_http_app(server: Server, settings: Settings, host: str = "127.0.0.1")
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
             allowed_hosts=list(settings.allowed_hosts),
-            allowed_origins=["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+            allowed_origins=list(settings.allowed_origins),
         ),
+        **oauth_options,
     )
+    if oauth_provider:
+        from .oauth_http import OAuthHTTPBoundary
+
+        return OAuthHTTPBoundary(app, settings, oauth_provider)
     return BearerMiddleware(app, settings.http_token) if settings.http_token else app

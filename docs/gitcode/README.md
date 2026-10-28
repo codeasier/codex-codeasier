@@ -2,15 +2,17 @@
 
 The `gitcode` plugin adds GitCode repository, issue, and pull-request tools to this marketplace. Its MCP server is a separate Python package in [`packages/gitcode-mcp`](../../packages/gitcode-mcp). The existing `codex-codeasier` workflow plugin remains independently installable.
 
-The server supports stdio and Streamable HTTP. The marketplace package uses stdio and starts an already-installed `gitcode-mcp` executable in the client's execution environment. It does not download an unpublished PyPI package, install Python dependencies, deploy a service, or connect an account by itself.
+The server supports stdio and Streamable HTTP. Public HTTPS deployments can use the GitCode OAuth broker so each ChatGPT connection authorizes its own GitCode account. The marketplace package uses stdio and starts an already-installed `gitcode-mcp` executable in the client's execution environment. It does not download an unpublished PyPI package, install Python dependencies, deploy a service, or connect an account by itself.
 
 ## Choose a setup
 
 | Goal | Start here |
 | --- | --- |
 | Use the plugin from a local Codex environment | [Install and verify](setup.md) |
-| Let a cloud dot call the GitCode tools | [Connect dot through Secure MCP Tunnel](connect-dot.md) |
+| Connect ChatGPT/dot directly to a public HTTPS server | [Connect ChatGPT with GitCode OAuth](connect-dot.md) |
+| Configure GitCode login, callbacks and persistent credentials | [OAuth configuration](oauth.md) |
 | Run a service on a persistent host or in Docker | [Deployment](deployment.md) |
+| Explicitly use a private stdio tunnel | [Optional Secure MCP Tunnel](connect-tunnel.md) |
 | Inspect the tool surface and write operations | [Tools](tools.md) |
 
 ## Code execution is separate from API access
@@ -34,8 +36,10 @@ A dot's cloud computer, a connected computer, a delegated Codex cloud task, and 
 - Python 3.11 or newer.
 - The package's pinned MCP SDK and GitCode client dependencies, installed with the package.
 - Git for `gitcode-clone` and code modification workflows; API tools do not require Git.
-- An authorized GitCode token on the MCP host, and separate Git credentials in any coding environment.
+- For local stdio/static-bearer mode: an authorized GitCode token on the MCP host.
+- For public OAuth mode: a registered GitCode OAuth application, distinct MCP client credentials, a public HTTPS origin and persistent encrypted state.
+- Separate Git credentials in any coding environment.
 
 ## Release boundary
 
-Version `0.1.0` supplies source, local plugin packaging, a runtime, tests, and deployment instructions. A Git commit or marketplace installation does not provision OpenAI Platform tunnels, configure user credentials, or prove a live dot connection. Complete the read-only smoke checks on your actual account before enabling the intended write workflow.
+This repository supplies source, local plugin packaging, a runtime, tests and deployment instructions. A Git commit or marketplace installation does not deploy HTTPS, register a GitCode OAuth application, configure user credentials or prove a live dot connection. Automated OAuth tests use mocked upstream endpoints. Complete the actual public HTTP authorization and a read through your ChatGPT connection before enabling the intended write workflow; a stdio smoke check does not verify that route.

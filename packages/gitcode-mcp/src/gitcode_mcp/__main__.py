@@ -37,11 +37,24 @@ def main(argv: list[str] | None = None) -> int:
             from dataclasses import replace
 
             settings = replace(settings, read_only=True)
+        if settings.oauth is not None and args.transport != "streamable-http":
+            raise ConfigurationError("OAuth mode requires --transport streamable-http.")
+        oauth_provider = None
+        if settings.oauth is not None:
+            from .oauth import GitCodeOAuthProvider
+            from .oauth_store import OAuthStoreError
+
+            try:
+                oauth_provider = GitCodeOAuthProvider(settings)
+            except OAuthStoreError:
+                raise ConfigurationError(
+                    "Cannot open OAuth storage. Check the database path, permissions and persistent encryption key."
+                ) from None
         api = GitCodeAPI(
             settings.token, timeout=settings.timeout, max_response_bytes=settings.max_response_bytes
         )
         try:
-            server = create_server(settings, api=api)
+            server = create_server(settings, api=api, oauth_provider=oauth_provider)
             if args.transport == "stdio":
 
                 async def serve() -> None:
@@ -50,12 +63,14 @@ def main(argv: list[str] | None = None) -> int:
 
                 anyio.run(serve)
             else:
-                app = create_http_app(server, settings, args.host)
+                app = create_http_app(server, settings, args.host, oauth_provider=oauth_provider)
                 uvicorn.run(
                     app, host=args.host, port=args.port, log_level="warning", access_log=False
                 )
         finally:
             api.close()
+            if oauth_provider is not None:
+                anyio.run(oauth_provider.aclose)
     except ConfigurationError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2

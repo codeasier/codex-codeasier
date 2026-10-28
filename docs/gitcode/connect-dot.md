@@ -1,81 +1,68 @@
-# Connect a dot to GitCode
+# Connect ChatGPT and dot to GitCode
 
-Use this guide for OpenAI's cloud dot. The repository's marketplace package launches a local stdio process and is marked as requiring a local executor. Installing it in a local Codex client does not register cloud tools for dot.
+Use a public HTTPS endpoint with GitCode OAuth when the MCP server runs on your cloud server. ChatGPT connects directly to the Server URL; this route has no tunnel client or OpenAI Platform runtime key.
 
-The preferred private connection is **Secure MCP Tunnel to this server's stdio entry point**. This avoids exposing the GitCode MCP process publicly or implementing an additional public OAuth service. It still requires OpenAI tunnel permissions and the user's configured GitCode credentials on the host.
+The repository's marketplace package is a separate local stdio installation. Installing that package does not deploy this HTTPS service or register a cloud connection.
 
-## 1. Prepare a persistent MCP host
+## 1. Prepare the public OAuth service
 
-Follow [Install and verify](setup.md) on a host that can reach GitCode and make outbound HTTPS requests to OpenAI. Record the absolute path to its installed `gitcode-mcp` executable. Configure the GitCode token, repository allowlist, and initial read-only mode in the environment that will start `tunnel-client` and its child server.
+Follow [GitCode OAuth configuration](oauth.md) and [deployment](deployment.md#public-https-with-gitcode-oauth). You need:
 
-Keep this host available for tool discovery and every later tool call. The MCP host need not be dot's code-editing environment.
+- A public HTTPS origin and a valid certificate.
+- A GitCode OAuth application whose callback is `https://YOUR_DOMAIN/oauth/gitcode/callback`.
+- Independent MCP client credentials to enter in ChatGPT.
+- The exact ChatGPT callback in the server's redirect allowlist before account linking.
+- Persistent SQLite state and the same encryption key after every restart.
 
-## 2. Create or select an OpenAI tunnel
+Start with `GITCODE_MCP_READ_ONLY=true`. Use `GITCODE_MCP_OAUTH_ALLOWED_USER_IDS` to restrict a personal service to the intended GitCode IDs and `GITCODE_MCP_ALLOWED_REPOS` to constrain repository access.
 
-Open [Platform tunnel settings](https://platform.openai.com/settings/organization/tunnels). Use the actual tunnel ID returned there, and associate the tunnel with the target ChatGPT workspace as well as its Platform organization.
+OAuth mode uses the credentials acquired by each individual connection. Leave `GITCODE_TOKEN`, `GC_TOKEN` and `GITCODE_MCP_HTTP_TOKEN` out of that service's configuration. For initial setup, the downstream callback allowlist can be empty: discovery remains available, while all authorization callbacks are rejected.
 
-Creating or editing a tunnel requires **Tunnels Read + Manage**. Running the client or selecting the tunnel in ChatGPT requires **Tunnels Read + Use**. These permissions are separate from the ChatGPT account's ability to add custom MCP plugins.
+## 2. Add the server in ChatGPT
 
-Download the supported `tunnel-client` from that page or the official [OpenAI release](https://github.com/openai/tunnel-client/releases/latest). Supply its restricted runtime key as `CONTROL_PLANE_API_KEY` through a secret manager or a hidden interactive prompt:
+Use ChatGPT on the web. Workspace permissions and security restrictions still apply.
 
-```bash
-read -r -s -p 'OpenAI tunnel runtime key: ' CONTROL_PLANE_API_KEY
-export CONTROL_PLANE_API_KEY
-```
+1. Open **Plugins → + → Add custom MCP server**.
+2. Give it a name such as `GitCode`.
+3. Under **Connection**, select **Server URL** and enter `https://YOUR_DOMAIN/mcp`.
+4. Choose **OAuth**, with explicit client credentials:
+   - Client ID: the value of `GITCODE_MCP_OAUTH_CLIENT_ID`.
+   - Client secret: the independent `GITCODE_MCP_OAUTH_CLIENT_SECRET`.
+   - Client token authentication, where shown: `client_secret_post`.
+5. Copy the exact callback displayed for this connection into `GITCODE_MCP_OAUTH_REDIRECT_URIS`. Update the server and restart it before completing account linking; the discovery-only bootstrap cannot authorize a user while that allowlist is empty.
+6. Review the displayed connection notice and create the plugin.
+7. Open the resulting plugin in **Personal** or the workspace where you created it, and install it.
 
-The runtime key authenticates to the OpenAI tunnel service. The GitCode token authenticates this MCP server to GitCode. Neither belongs in tool arguments or tool results.
+The server publishes the authorization and token endpoints through metadata. It uses preregistration; do not choose DCR or CIMD for this implementation. The GitCode application ID/secret are upstream server credentials and do not belong in ChatGPT's MCP client fields.
 
-## 3. Start the stdio tunnel
+If ChatGPT prompts you to connect an account, complete GitCode's authorization screen, then review the MCP service's client and scope consent screen. For a private deployment, use the GitCode account allowed by the server's stable-ID allowlist.
 
-Replace the tunnel ID and executable path below with your actual values:
+Official instructions: [Add custom MCP server](https://developers.openai.com/api/docs/guides/custom-mcp-server), [MCP authentication](https://developers.openai.com/plugins/build/auth), and [connect and test](https://developers.openai.com/plugins/deploy/connect-chatgpt).
 
-```bash
-tunnel-client help quickstart
-tunnel-client init \
-  --sample sample_mcp_stdio_local \
-  --profile gitcode \
-  --tunnel-id 'tunnel_REPLACE_WITH_ACTUAL_ID' \
-  --mcp-command '/absolute/path/to/gitcode-mcp'
-tunnel-client doctor --profile gitcode --explain
-tunnel-client run --profile gitcode
-```
+## 3. Verify a real tool call
 
-The client initiates outbound HTTPS to `api.openai.com:443`; no inbound public MCP listener is needed. Keep `run` active. For a persistent service, use your service manager to supply the same profile and environment, and stop the old stdio client before starting its replacement. Use the client's health/readiness checks and logs to verify polling.
+In a new conversation, select the installed plugin with `@` and ask:
 
-See the current [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) for permissions, workspace association, proxies, custom certificates, and connection diagnostics.
+> Use the GitCode plugin to get repository metadata and clone information for OWNER/REPO. Only read data.
 
-## 4. Register the custom MCP plugin
+Inspect the actual tool calls and results. Confirm the intended repository and branch, and that clone URLs contain no credentials. A running container, successful HTTPS GET, local stdio smoke test or mocked OAuth test does not establish this ChatGPT connection.
 
-In ChatGPT on the web:
+Keep acceptance read-only. To use the Issue/PR management workflow, enable server write mode, refresh the plugin's tools, then reconnect or repeat OAuth authorization to obtain `gitcode:write`. Refreshing tools or an existing token does not elevate a read-only grant. GitCode account permissions, branch protections and ChatGPT's action approvals continue to apply.
 
-1. Open **Plugins**, select **+**, then **Add custom MCP server**.
-2. Enter a name such as `GitCode private`.
-3. Under **Connection**, choose **Tunnel** and select the tunnel or enter its actual ID.
-4. For this private stdio setup, choose **No authentication** at the MCP application layer. Access to the tunnel is controlled by OpenAI; the GitCode upstream credential stays on the host. This configuration represents that host's configured GitCode account.
-5. Review the displayed connection warning, create the plugin, inspect the tools, and install it.
+After changing runtime settings or tool definitions, restart the service, refresh its metadata in ChatGPT and repeat the affected check. Reconnect when the authorization grant expires. See [OAuth operation and lifetimes](oauth.md#4-configure-persistent-state-and-access).
 
-These steps register a connection; pushing this repository to GitHub does not perform them. If Tunnel is absent or the tunnel is not listed, check workspace association and permissions in the official guide. Do not substitute a secret-bearing public URL.
+## 4. Give code work an execution environment
 
-## 5. Verify through dot
+For a code fix, have dot read the issue and call `gitcode_get_clone_info`, then clone, edit, test and push in the actual coding environment. Configure that environment's Git credential helper or SSH identity separately.
 
-Ask dot to use the installed GitCode plugin to read an allowed repository and obtain its clone metadata. Check the tool call and result, not just the natural-language response. Confirm the repository, branch, and credential-free clone URL match what you intended.
+The MCP service does not expose its tokens or filesystem. A checkout on the MCP host is not automatically visible to dot's shell. A cloud-only custom MCP connection discovers tools but does not automatically install the local `gitcode-workflow` skill.
 
-Enable the required write operations only after the actual account and tool connection have been checked. Account/workspace restrictions can differ from the general developer documentation. Validate a narrowly scoped write on a repository you control before relying on Issue/PR automation; this project does not assert that every account has identical custom-MCP write access.
+OpenAI's [dot task documentation](https://learn.chatgpt.com/docs/dots/tasks-and-memory) explains delegation and environment boundaries.
 
-After changing tool definitions or runtime configuration, restart the server, refresh the connection's tools in ChatGPT, and repeat the affected checks. See [Connect and test your plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt).
+## Other connection routes
 
-## 6. Give code work an explicit execution environment
+- **Local Codex:** use [the stdio plugin setup](setup.md), with its own GitCode PAT or Git credentials.
+- **Private stdio host:** the optional [Secure MCP Tunnel guide](connect-tunnel.md) remains available for deployments that explicitly choose that route.
+- **Public directory distribution:** creating a personal/workspace connection is separate from submitting a plugin for public distribution.
 
-For a code fix, have dot read the issue and call `gitcode_get_clone_info`, then delegate cloning, editing, testing, and pushing to a connected computer or prepared coding environment. Install the runtime there if using `gitcode-clone`, and configure that environment's Git authentication separately.
-
-The MCP server does not return its token or mount its filesystem in dot. A directory created by a remote server would not become visible to dot's shell. The workflow skill is available in the local plugin package; a cloud-only custom MCP connection discovers the server tools but does not automatically import that local skill file.
-
-OpenAI's [dot task documentation](https://learn.chatgpt.com/docs/dots/tasks-and-memory) describes delegation and environment boundaries. Current [Codex Cloud setup](https://learn.chatgpt.com/docs/environments/cloud-environments) documents GitHub repository selection; this project does not claim native GitCode environment provisioning.
-
-## Other distribution routes
-
-- **Local Codex:** install the repository's `gitcode` plugin and runtime using [setup](setup.md).
-- **Workspace GitHub import:** OpenAI currently marks imported packages declaring `mcp.json`/`.mcp.json` as Desktop only, including remote HTTP entries. A supported cloud workflow can instead reference an already-registered app, with its existing access and authentication. See [Plugin management](https://learn.chatgpt.com/docs/enterprise/plugin-management).
-- **Public directory submission:** deploy a stable authenticated HTTPS endpoint and follow the separate public submission process. Secure MCP Tunnel alone does not satisfy public submission requirements.
-
-The server's optional HTTP bearer token is transport protection for controlled clients or a gateway. It is not a public MCP OAuth implementation and does not make a public endpoint ready for ChatGPT OAuth registration.
+A cloud-only OAuth connection is added by its HTTPS Server URL. The repository's `plugins/gitcode/mcp.json` remains a portable local stdio manifest; it does not contain your deployment URL or secrets.
