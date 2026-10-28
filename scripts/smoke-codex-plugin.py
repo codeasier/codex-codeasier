@@ -132,9 +132,19 @@ async def discover(codex: Path, environment: dict[str, str], cwd: Path, installe
         try:
             await asyncio.wait_for(process.wait(), 5)
         except TimeoutError:
-            os.killpg(process.pid, signal.SIGKILL)
-            await process.wait()
-        await stderr_task
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(process.wait(), 5)
+            except TimeoutError:
+                pass
+        try:
+            await asyncio.wait_for(stderr_task, 2)
+        except TimeoutError:
+            pass
+        require(process.returncode is not None, "Codex app-server cleanup timed out.")
 
 
 async def check(root: Path, codex: Path, evidence: dict) -> None:
