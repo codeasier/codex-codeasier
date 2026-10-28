@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitCode workflow"
+  short_description: "Investigate GitCode issues and prepare pull requests"
+  default_prompt: "Use $gitcode-workflow to investigate a GitCode issue and prepare a tested pull request."
