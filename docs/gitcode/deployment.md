@@ -79,7 +79,7 @@ docker compose \
   logs --tail=50
 ```
 
-After changing a secret file or environment setting, recreate the container; a plain restart does not load changed Compose environment values:
+After updating the deployed checkout, rebuild the image and recreate the container to run the new code. Also recreate after changing a secret file or environment setting; a plain restart does not load changed Compose environment values:
 
 ```bash
 docker compose \
@@ -92,7 +92,11 @@ Record the deployed commit before upgrading. Back up the SQLite database consist
 
 Changing the encryption key under an existing database invalidates its stored credentials. This release does not provide an in-place encryption-key rotation command. Plan account reconnection when replacing lost state or keys.
 
-MCP access tokens last at most 15 minutes; a grant's fixed maximum lifetime is 30 days. Account reconnects and upstream revocation can still be necessary. After enabling write mode, refresh tool metadata and reconnect or repeat OAuth authorization for `gitcode:write`; refreshing a read-only grant cannot broaden its scopes.
+After the new runtime is running, refresh ChatGPT's tool metadata. A writable connection exposes 31 tools, including `gitcode_create_file`, `gitcode_update_file` and `gitcode_delete_file`; read-only connections expose 19. These tools use the existing OAuth authorization for [API code publishing](code-publishing.md), without additional Git credentials in dot's shell.
+
+Update an existing reverse proxy's request-size limit as well: the current Nginx example sets `client_max_body_size 2m`, matching the MCP server's 2 MiB HTTP request limit. This accommodates JSON escaping for file content up to the separate 256 KiB decoded limit. A proxy still using `1m` can reject a valid file-tool request before it reaches the application. OAuth form bodies retain their 16 KiB application limit. Validate and reload Nginx after changing its configuration.
+
+MCP access tokens last at most 15 minutes; a grant's fixed maximum lifetime is 30 days. Account reconnects and upstream revocation can still be necessary. After enabling write mode, a previously read-only grant needs a new OAuth authorization for `gitcode:write`; refreshing it cannot broaden its scopes. An existing write grant does not need reauthorization solely to use newly added file tools.
 
 ## Verify the actual deployment
 
@@ -107,7 +111,7 @@ MCP access tokens last at most 15 minutes; a grant's fixed maximum lifetime is 3
 
 Keep this acceptance read-only; do not create an issue or PR solely to prove deployment. Test actual mutations only when the user authorizes a specific operation.
 
-`python -m gitcode_mcp.smoke` exercises **stdio**, not the HTTPS/OAuth path. Mocked HTTP tests, a running container or a successful HTTP GET do not establish a live GitCode or ChatGPT connection. This repository's implementation work has not registered a real GitCode OAuth application or completed account-level ChatGPT linking.
+`python -m gitcode_mcp.smoke` exercises **stdio**, not the HTTPS/OAuth path. Mocked HTTP tests, a running container or a successful HTTP GET do not establish a live GitCode or ChatGPT connection. Deployment and account-level checks must be performed against the service and account you actually use; a successful read does not establish write permission for every repository.
 
 ## Existing PAT and static-bearer mode
 

@@ -314,7 +314,8 @@ class GitCodeOAuthProvider(
                 return self._error_page()
             escape = html.escape
             actions = "read repository data" + (
-                " and manage issues, branches and pull requests"
+                ", create, replace and delete repository files, publish code commits, "
+                "and manage issues, branches and pull requests"
                 if WRITE_SCOPE in record["scopes"]
                 else ""
             )

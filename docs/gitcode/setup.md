@@ -60,6 +60,8 @@ export GITCODE_MCP_READ_ONLY=true
 
 The allowlist and read-only mode apply on the server, independently of model instructions and host approval settings. To allow the write workflow already authorized by the user, set `GITCODE_MCP_READ_ONLY=false` in the server's environment and restart that server. GitCode permissions and branch protections still apply.
 
+The write catalog includes `gitcode_create_file`, `gitcode_update_file` and `gitcode_delete_file`. They publish individual file changes using this MCP process's configured GitCode account; they do not require a separate Git login in the client's shell. Follow [code publishing](code-publishing.md) for the branch, Blob SHA, content limits and verification workflow. Read-only mode exposes 19 tools; write mode exposes 31.
+
 ## Install the Codex plugin
 
 After installing the runtime and configuring the MCP host environment:

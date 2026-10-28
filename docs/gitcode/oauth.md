@@ -142,10 +142,14 @@ The built-in `python -m gitcode_mcp.smoke` starts a **stdio** subprocess. It ver
 5. Continued access through token refresh and service restart, with the same database and storage key.
 6. The same read through the installed ChatGPT connection.
 
-Keep deployment acceptance read-only. Enable `GITCODE_MCP_READ_ONLY=false` for the intended Issue/PR management workflow only after the correct account and repository access have been verified. Refresh ChatGPT's tool metadata, then reconnect or repeat OAuth authorization to grant `gitcode:write`. Refreshing a tool list or an existing token does not expand a previously read-only grant. Enabling tools does not authorize unrelated writes.
+Keep deployment acceptance read-only. Enable `GITCODE_MCP_READ_ONLY=false` for the intended file publishing or Issue/PR management workflow after the correct account and repository access have been verified. Refresh ChatGPT's tool metadata. If the grant was read-only, reconnect or repeat OAuth authorization to grant `gitcode:write`; refreshing a tool list or an existing token does not expand it. Existing write grants cover the file publishing tools without a new authorization solely for those tools. Enabling tools does not authorize unrelated writes.
+
+### Publish files with the authorized account
+
+`gitcode_create_file`, `gitcode_update_file` and `gitcode_delete_file` use the current connection's upstream GitCode authorization, with the same read-only, scope and repository restrictions as other writes. They do not require a separate Git credential in dot's execution environment. Each call publishes one file change and one commit; there is no atomic multi-file commit API in this tool surface. Follow [code publishing](code-publishing.md) to prepare, verify and submit the result as a PR.
 
 ### Validation boundary
 
 The repository's automated OAuth tests use mocked GitCode endpoints to exercise the HTTP authorization and MCP flows and their failure cases. They do not prove a real GitCode OAuth application, issued credentials, a live domain/certificate or a particular ChatGPT account works. Complete that account-level check before describing a deployment as connected.
 
-OAuth tokens are used for GitCode API calls. The service does not return them for `git clone` or configure credentials on another machine. Clone, edit, test and push still use the actual coding environment and its own Git credentials.
+OAuth tokens are used for GitCode API calls, including file publishing. The service does not return them for `git clone` or configure credentials on another machine. Native clone, fetch, pull and push use the actual coding environment and its own Git credentials; test execution also requires an execution environment. An API write is not evidence that project tests ran.

@@ -64,9 +64,11 @@ Enable the required write operations only after the actual account and tool conn
 
 After changing tool definitions or runtime configuration, restart the server, refresh the connection's tools in ChatGPT, and repeat the affected checks. See [Connect and test your plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt).
 
-## 6. Give code work an explicit execution environment
+## 6. Publish code or use a Git execution environment
 
-For a code fix, have dot read the issue and call `gitcode_get_clone_info`, then delegate cloning, editing, testing, and pushing to a connected computer or prepared coding environment. Install the runtime there if using `gitcode-clone`, and configure that environment's Git authentication separately.
+For API code publishing, follow the [file publishing workflow](code-publishing.md). Create a scoped branch, read instructions and current files, prepare and check the change, then use the file tools sequentially and verify the result before creating a PR. These tools use the MCP server's configured GitCode account; no separate Git credentials are required for the API writes.
+
+For native clone, commit and push, call `gitcode_get_clone_info` and use a connected computer or prepared coding environment. Install the runtime there if using `gitcode-clone`, and configure that environment's Git authentication separately. Project tests also run in an actual execution environment, not through the MCP server.
 
 The MCP server does not return its token or mount its filesystem in dot. A directory created by a remote server would not become visible to dot's shell. The workflow skill is available in the local plugin package; a cloud-only custom MCP connection discovers the server tools but does not automatically import that local skill file.
 

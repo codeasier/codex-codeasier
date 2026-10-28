@@ -28,8 +28,8 @@ def catalog(response=None, *, read_only=False, allowed=()):
 def test_catalog_has_focused_schemas_and_explicit_annotations():
     with catalog() as (tools, _):
         definitions = tools.list_tools()
-    assert len(definitions) == 28
-    assert len({tool.name for tool in definitions}) == 28
+    assert len(definitions) == 31
+    assert len({tool.name for tool in definitions}) == 31
     for tool in definitions:
         assert tool.name.startswith("gitcode_")
         assert tool.input_schema["additionalProperties"] is False
@@ -39,7 +39,8 @@ def test_catalog_has_focused_schemas_and_explicit_annotations():
     merge = next(tool for tool in definitions if tool.name == "gitcode_merge_pull_request")
     assert merge.annotations.destructive_hint
     assert not merge.annotations.read_only_hint
-    assert not any("delete" in tool.name or "raw_api" in tool.name for tool in definitions)
+    assert {tool.name for tool in definitions if "delete" in tool.name} == {"gitcode_delete_file"}
+    assert not any("raw_api" in tool.name for tool in definitions)
 
 
 def test_read_only_mode_hides_and_refuses_write_calls():

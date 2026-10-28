@@ -22,7 +22,9 @@ server {
     ssl_certificate /etc/letsencrypt/live/mcp.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/mcp.example.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    client_max_body_size 1m;
+    # Match the MCP HTTP request limit, including JSON-escaped file contents.
+    # OAuth form routes retain their smaller application-level limit.
+    client_max_body_size 2m;
 
     # OAuth callbacks contain authorization codes and state in the query string.
     # Keep access logging off, including any inherited upstream/CDN request logs.
