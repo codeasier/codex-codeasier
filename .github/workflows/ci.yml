@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 22
       - name: Test marketplace validation
-        run: node --test scripts/validate.test.mjs
+        run: node --test scripts/validate.test.mjs scripts/gitcode-runtime.test.mjs
       - id: workflow-source
         name: Read workflow source lock
         run: |
@@ -39,12 +39,12 @@ jobs:
             --target .
       - run: node scripts/validate.mjs
 
-  gitcode-mcp:
+  gitcode-bridge:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,22 +52,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-          cache-dependency-path: packages/gitcode-mcp/pyproject.toml
-      - name: Install package and development dependencies
-        run: python -m pip install 'packages/gitcode-mcp[dev]' build
-      - name: Check Python formatting and lint
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the exact upstream runtime in a clean environment
         run: |
-          python -m ruff check packages/gitcode-mcp
-          python -m ruff format --check packages/gitcode-mcp
-      - name: Test GitCode MCP
-        run: python -m pytest packages/gitcode-mcp/tests
-      - name: Build distributions
-        run: python -m build packages/gitcode-mcp --outdir dist
-      - name: Smoke test an isolated wheel installation
+          python -m venv "$RUNNER_TEMP/gitcode-bridge"
+          requirement="$(node scripts/gitcode-runtime.mjs)"
+          "$RUNNER_TEMP/gitcode-bridge/bin/python" -m pip install "$requirement"
+      - name: Check bridge helper regressions
         run: |
-          python -m venv "$RUNNER_TEMP/gitcode-wheel"
-          "$RUNNER_TEMP/gitcode-wheel/bin/python" -m pip install dist/codeasier_gitcode_mcp-*.whl
-          export PATH="$RUNNER_TEMP/gitcode-wheel/bin:$PATH"
+          "$RUNNER_TEMP/gitcode-bridge/bin/python" -m unittest discover -s scripts -p test_gitcode_bridge.py
+      - name: Verify source, actual plugin command, tools and permission guards
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/gitcode-bridge/bin:$PATH"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/gitcode-wheel/bin/python" -I -m gitcode_mcp.smoke
+          "$RUNNER_TEMP/gitcode-bridge/bin/python" -I "$GITHUB_WORKSPACE/scripts/smoke-gitcode-bridge.py" \
+            --root "$GITHUB_WORKSPACE" | tee "$GITHUB_WORKSPACE/gitcode-bridge-${{ matrix.python-version }}.txt"
+      - name: Preserve bridge acceptance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitcode-bridge-${{ matrix.python-version }}
+          path: gitcode-bridge-${{ matrix.python-version }}.txt
+          if-no-files-found: error

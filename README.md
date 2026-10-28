@@ -104,22 +104,22 @@ Natural-language requests such as `Use issue-review for issue 42` also work, but
 
 ## GitCode Plugin
 
-Install the runtime in the same environment that launches the MCP server, then install the separate plugin:
+The separate `gitcode` plugin is a thin Codex bridge to the MCP runtime maintained in [codeasier/gitcode-cli](https://github.com/codeasier/gitcode-cli). Its exact runtime source is recorded in [gitcode-runtime.lock.json](gitcode-runtime.lock.json); plugin and runtime versions are independent.
+
+Install that runtime in the environment which launches MCP, then install the plugin:
 
 ```bash
-cd /absolute/path/to/codex-codeasier
-uv tool install ./packages/gitcode-mcp
+# From this checkout, with Node.js 22+ and your intended Python 3.11+ environment:
+python -m pip install "$(node scripts/gitcode-runtime.mjs)"
 codex plugin marketplace add codeasier/codex-codeasier
 codex plugin add gitcode@codex-codeasier
 ```
 
-If this marketplace is already registered, reuse it. Configure `GITCODE_TOKEN` or `GC_TOKEN` through the host's secret mechanism before starting the plugin. Use `GITCODE_MCP_ALLOWED_REPOS` to restrict repositories and `GITCODE_MCP_READ_ONLY=true` for read-only operation. See the [GitCode setup guide](docs/gitcode/setup.md) for a pip alternative, credentials, smoke checks, and updates.
+Keep `gitcode-mcp` on the MCP host's `PATH`. Reuse an existing marketplace registration. Follow [bridge setup](docs/gitcode/setup.md) for an isolated environment, credentials, offline source/command smoke and updates, and [compatibility and migration](docs/gitcode/migration.md) when upgrading an old installation.
 
-Invoke `$gitcode-workflow` for GitCode tasks. Its 31 MCP tools read repository data, publish individual file changes to a remote branch, and manage issues and PRs. The [code publishing guide](docs/gitcode/code-publishing.md) covers creating a work branch, reading existing files, publishing changes and opening a PR. Each file write produces its own commit; multiple file writes are sequential, not one atomic commit.
+Invoke `$gitcode-workflow` for GitCode tasks. File tools publish individual remote commits using the connected account; native Git and project checks still run in an actual coding environment. The MCP server does not share its filesystem or credentials with Codex, and OAuth does not automatically configure local `git pull/push`.
 
-API publishing uses the MCP connection's existing GitCode authorization and does not require Git credentials in dot's shell. For native clone, local development, tests, commit and push, use an actual coding environment with its own Git authentication. `gitcode_get_clone_info` returns credential-free URLs only; the remote MCP server does not share its filesystem or credentials with dot.
-
-For a cloud dot, deploy the [public HTTPS server with GitCode OAuth](docs/gitcode/oauth.md), then [connect its Server URL in ChatGPT](docs/gitcode/connect-dot.md). Each connection authorizes its own GitCode account. A local marketplace installation does not deploy the server or register a cloud connection. The [GitCode guide](docs/gitcode/README.md) also covers the tool catalog, Docker deployment, and the optional private stdio tunnel route.
+The upstream repository owns [tool contracts, OAuth, code publishing and deployment](https://github.com/codeasier/gitcode-cli/tree/main/docs/gitcode). Installing this bridge does not deploy or upgrade a public server. Public OAuth cutover remains a separate operator-controlled action which must preserve existing authorization state.
 
 ## Unsupported Workflow Plugin Features
 
@@ -133,6 +133,6 @@ The workflow plugin has no runtime dependencies. Validate the marketplace manife
 node scripts/validate.mjs
 ```
 
-The GitCode runtime has its own Python dependencies and checks. See [GitCode setup](docs/gitcode/setup.md#smoke-checks) and the package's development instructions.
+GitCode runtime regression tests and package builds live upstream. This repository validates the fixed source and exercises the installed plugin command with [bridge smoke checks](docs/gitcode/setup.md#smoke-checks). Its CI preserves the original workflow generation checks.
 
 MIT licensed.

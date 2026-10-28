@@ -3,6 +3,7 @@
 *.swo
 .codex/
 .venv/
+.venv-gitcode/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -13,6 +14,7 @@ htmlcov/
 build/
 dist/
 .workflow-source/
+gitcode-bridge-*.txt
 .env
 .env.*
 !.env.example

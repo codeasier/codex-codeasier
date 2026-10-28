@@ -29,6 +29,7 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   await cp(join(root, "plugins/codex-codeasier"), join(directory, "plugins/codex-codeasier"), { recursive: true });
   await cp(join(root, "workflow-source.lock.json"), join(directory, "workflow-source.lock.json"));
+  await cp(join(root, "gitcode-runtime.lock.json"), join(directory, "gitcode-runtime.lock.json"));
   await writeJson(join(directory, marketplacePath), {
     name: "codex-codeasier",
     interface: { displayName: "Codeasier" },
@@ -42,7 +43,7 @@ async function fixture(t) {
   await writeJson(join(directory, gitcodePath), {
     $schema: pluginSchema,
     name: "gitcode",
-    version: "0.3.0",
+    version: "0.4.0",
     description: "GitCode repository workflows",
     extensions: {
       "com.openai": {
@@ -131,7 +132,7 @@ test("rejects source traversal, absolute paths, and escaping symlinks", async (t
 });
 
 test("rejects invalid manifest types, schemas, and ambiguous manifest locations", async (t) => {
-  for (const path of [marketplacePath, legacyPath, gitcodePath, mcpPath, "workflow-source.lock.json"]) {
+  for (const path of [marketplacePath, legacyPath, gitcodePath, mcpPath, "workflow-source.lock.json", "gitcode-runtime.lock.json"]) {
     await t.test(`non-object: ${path}`, async (t) => {
       const directory = await fixture(t);
       await writeJson(join(directory, path), []);
@@ -201,5 +202,24 @@ test("retains legacy manifest, marketplace policy, lock, and eleven-skill checks
     const directory = await fixture(t);
     await writeFile(join(directory, "plugins/codex-codeasier/skills/handoff/SKILL.md"), "---\nname: handoff\ndescription: Handoff work.\n---\nUse the question tool.\n");
     await expectFailure(directory, /contains forbidden text: question tool/);
+  });
+});
+
+
+test("requires the pinned upstream runtime without weakening the workflow lock", async (t) => {
+  await t.test("missing runtime lock", async (t) => {
+    const directory = await fixture(t);
+    await rm(join(directory, "gitcode-runtime.lock.json"));
+    await expectFailure(directory, /cannot read GitCode runtime lock/);
+  });
+  await t.test("floating runtime source", async (t) => {
+    const directory = await fixture(t);
+    await editJson(directory, "gitcode-runtime.lock.json", (value) => { value.commit = "main"; });
+    await expectFailure(directory, /GitCode runtime lock commit must be a full lowercase commit SHA/);
+  });
+  await t.test("unexpected runtime source", async (t) => {
+    const directory = await fixture(t);
+    await editJson(directory, "gitcode-runtime.lock.json", (value) => { value.repository = "example/other"; });
+    await expectFailure(directory, /GitCode runtime lock repository must equal/);
   });
 });
