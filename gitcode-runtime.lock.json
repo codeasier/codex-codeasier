@@ -1,0 +1,7 @@
+{
+  "repository": "codeasier/gitcode-cli",
+  "commit": "68f9265d0755222d3ffc33ae6926f1e69e223c2f",
+  "subdirectory": "packages/gitcode-mcp",
+  "distribution": "codeasier-gitcode-mcp",
+  "version": "0.3.0"
+}

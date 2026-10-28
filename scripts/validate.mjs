@@ -1,6 +1,7 @@
 import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateRuntimeLock } from "./gitcode-runtime.mjs";
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const marketplaceName = "codex-codeasier";
@@ -163,6 +164,12 @@ export async function validateRepository(rootDirectory = repositoryRoot) {
     }
   }
 
+  const runtimeLockPath = await containedPath(root, "./gitcode-runtime.lock.json", "GitCode runtime lock", "file");
+  if (runtimeLockPath) {
+    const runtimeLock = await readObject(runtimeLockPath, "GitCode runtime lock");
+    if (runtimeLock) errors.push(...validateRuntimeLock(runtimeLock));
+  }
+
   // Preserve the pinned workflow source and all original generated-skill gates.
   const workflowSourceLock = await readObject(join(root, "workflow-source.lock.json"), "workflow source lock");
   if (workflowSourceLock) {
@@ -267,7 +274,7 @@ export async function validateRepository(rootDirectory = repositoryRoot) {
           await validateSkills(pluginRoot, entry.name, expectedSkills, forbidden);
         } else if (entry.name === "gitcode") {
           if (manifests[0] !== "./plugin.json") fail("gitcode must use its portable root plugin manifest");
-          expectFields("gitcode plugin manifest", manifest, { $schema: pluginSchema, version: "0.3.0" });
+          expectFields("gitcode plugin manifest", manifest, { $schema: pluginSchema, version: "0.4.0" });
           const openai = manifest.extensions?.["com.openai"];
           expectFields("gitcode OpenAI extension", openai, { requires_local_executor: true });
           expectFields("gitcode interface", openai?.interface, { displayName: "GitCode", category: "Developer Tools" });
