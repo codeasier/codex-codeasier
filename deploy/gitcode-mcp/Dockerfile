@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY packages/gitcode-mcp/pyproject.toml packages/gitcode-mcp/README.md /app/packages/gitcode-mcp/
 COPY packages/gitcode-mcp/src /app/packages/gitcode-mcp/src
-RUN python -m pip install --no-cache-dir /app/packages/gitcode-mcp
+RUN python -m pip install --no-cache-dir /app/packages/gitcode-mcp \
+    && install -d -m 0700 -o 10001 -g 10001 /var/lib/gitcode-mcp
 
 USER 10001:10001
 EXPOSE 8765

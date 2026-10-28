@@ -2,6 +2,8 @@
 
 Run installation in the environment that will launch the MCP server. A terminal export on your laptop does not configure an already-running desktop app, a remote worker, or a separate cloud task.
 
+This page covers the existing local stdio/PAT installation. For a cloud server that ChatGPT connects to by HTTPS URL, use [OAuth configuration](oauth.md), [deployment](deployment.md) and [ChatGPT connection](connect-dot.md). OAuth mode uses individual GitCode authorizations and must not be configured with the PAT variables below.
+
 ## Install the runtime from this repository
 
 With Python 3.11+ and [uv](https://docs.astral.sh/uv/guides/tools/):
@@ -25,7 +27,7 @@ Use `uv tool install --reinstall ./packages/gitcode-mcp` to replace an existing 
 
 Make `gitcode-mcp` available on the MCP host's `PATH`. If a GUI or service uses a different `PATH`, configure that host to resolve the installed executable. The plugin's command intentionally does not reach outside its package directory to an adjacent source checkout.
 
-## Configure the service account
+## Configure the local PAT account
 
 Create a token using GitCode's [PAT settings](https://docs.gitcode.com/docs/help/home/user_center/security_management/user_pat/) and supply it through your execution environment's secret mechanism. The server accepts `GITCODE_TOKEN`, with `GC_TOKEN` as an alternative.
 
@@ -45,12 +47,14 @@ export GITCODE_MCP_READ_ONLY=true
 
 | Setting | Meaning |
 | --- | --- |
+| `GITCODE_MCP_AUTH_MODE` | Default `bearer` preserves this local PAT workflow; use `oauth` only for the separately configured public HTTP broker |
 | `GITCODE_TOKEN` or `GC_TOKEN` | GitCode API credential, retained by the server process |
 | `GITCODE_USERNAME` | Your actual GitCode username; needed when the clone helper uses a token through temporary HTTPS askpass |
 | `GITCODE_MCP_ALLOWED_REPOS` | Optional comma-separated `owner/repo` allowlist; unset allows repositories accessible to the token |
 | `GITCODE_MCP_READ_ONLY` | Set `true` to reject write operations; default is `false` |
 | `GITCODE_MCP_HTTP_TOKEN` | Separate bearer credential protecting HTTP MCP access; at least 32 characters, different from the GitCode token, required for non-loopback binding |
 | `GITCODE_MCP_ALLOWED_HOSTS` | Optional HTTP Host allowlist; defaults to loopback hostnames and addresses |
+| `GITCODE_MCP_ALLOWED_ORIGINS` | Optional explicit HTTP Origin allowlist; defaults to loopback origins |
 | `GITCODE_MCP_TIMEOUT` | Upstream request timeout in seconds; default 30, range 1–120 |
 | `GITCODE_MCP_MAX_RESPONSE_BYTES` | Upstream response size limit; default 2,000,000 bytes, range 1,024–10,000,000 |
 
@@ -81,7 +85,7 @@ codex plugin marketplace upgrade codex-codeasier
 codex plugin add gitcode@codex-codeasier
 ```
 
-Removing this plugin does not delete an independently installed Python runtime, revoke a GitCode token, or stop a separately deployed tunnel:
+Removing this plugin does not delete an independently installed Python runtime, revoke a GitCode token, or stop a separately deployed service:
 
 ```bash
 codex plugin remove gitcode@codex-codeasier
@@ -101,7 +105,7 @@ The default check starts a subprocess, initializes MCP, lists tools, and exercis
 python -m gitcode_mcp.smoke --repo owner/repository
 ```
 
-Use `python -m gitcode_mcp.smoke --help` for details. A local protocol check is not evidence that your GitCode account or dot connection works.
+Use `python -m gitcode_mcp.smoke --help` for details. This command exercises stdio; it is not a public HTTP/OAuth check. A local protocol check is not evidence that your GitCode account or dot connection works.
 
 For an interactive inspection, launch [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector), choose stdio, and use `gitcode-mcp` as the command:
 

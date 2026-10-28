@@ -6,6 +6,11 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from .oauth_config import OAuthSettings
 
 _COMPONENT = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
 _REPOSITORY = re.compile(rf"{_COMPONENT}/{_COMPONENT}\Z")
@@ -54,10 +59,31 @@ class Settings:
     timeout: float = 30.0
     max_response_bytes: int = 2_000_000
     allowed_hosts: tuple[str, ...] = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+    allowed_origins: tuple[str, ...] = (
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+    )
+    oauth: OAuthSettings | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         env = os.environ if env is None else env
+        auth_mode = env.get("GITCODE_MCP_AUTH_MODE", "bearer")
+        if auth_mode not in {"bearer", "oauth"}:
+            raise ConfigurationError("GITCODE_MCP_AUTH_MODE must be bearer or oauth.")
+        oauth = None
+        if auth_mode == "oauth":
+            from .oauth_config import OAuthSettings
+
+            if any(
+                env.get(name) for name in ("GITCODE_TOKEN", "GC_TOKEN", "GITCODE_MCP_HTTP_TOKEN")
+            ):
+                raise ConfigurationError(
+                    "OAuth mode cannot use GITCODE_TOKEN, GC_TOKEN or GITCODE_MCP_HTTP_TOKEN. "
+                    "Each connection uses its own GitCode OAuth authorization."
+                )
+            oauth = OAuthSettings.from_env(env)
         token = env.get("GITCODE_TOKEN") or env.get("GC_TOKEN", "")
         http_token = env.get("GITCODE_MCP_HTTP_TOKEN", "")
         if any(c.isspace() or ord(c) < 32 for c in token + http_token):
@@ -87,6 +113,48 @@ class Settings:
             raise ConfigurationError(
                 "GITCODE_MCP_ALLOWED_HOSTS must list explicit host names (optionally :*)."
             )
+        origins = tuple(
+            value.strip()
+            for value in env.get(
+                "GITCODE_MCP_ALLOWED_ORIGINS",
+                "http://127.0.0.1:*,http://localhost:*,http://[::1]:*",
+            ).split(",")
+            if value.strip()
+        )
+        for origin in origins:
+            # The port wildcard is retained only for the existing local development origins.
+            check = origin[:-2] if origin.endswith(":*") else origin
+            try:
+                parsed = urlsplit(check)
+                valid_origin = (
+                    parsed.scheme in {"http", "https"}
+                    and parsed.hostname
+                    and not parsed.path
+                    and not parsed.query
+                    and not parsed.fragment
+                    and parsed.username is None
+                    and parsed.password is None
+                    and parsed.port != 0
+                    and "*" not in check
+                    and "\\" not in check
+                    and origin.isascii()
+                    and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in origin)
+                )
+                if origin.endswith(":*") and parsed.hostname not in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                }:
+                    valid_origin = False
+            except ValueError:
+                valid_origin = False
+            if not valid_origin:
+                raise ConfigurationError("GITCODE_MCP_ALLOWED_ORIGINS must list explicit origins.")
+        if oauth:
+            if "GITCODE_MCP_ALLOWED_HOSTS" not in env:
+                hosts += (urlsplit(oauth.public_url).netloc,)
+            if "GITCODE_MCP_ALLOWED_ORIGINS" not in env:
+                origins += (oauth.public_url,)
         return cls(
             token=token,
             http_token=http_token,
@@ -97,4 +165,6 @@ class Settings:
                 _number(env, "GITCODE_MCP_MAX_RESPONSE_BYTES", "2000000", 1024, 10_000_000)
             ),
             allowed_hosts=hosts,
+            allowed_origins=origins,
+            oauth=oauth,
         )

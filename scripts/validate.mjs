@@ -267,7 +267,7 @@ export async function validateRepository(rootDirectory = repositoryRoot) {
           await validateSkills(pluginRoot, entry.name, expectedSkills, forbidden);
         } else if (entry.name === "gitcode") {
           if (manifests[0] !== "./plugin.json") fail("gitcode must use its portable root plugin manifest");
-          expectFields("gitcode plugin manifest", manifest, { $schema: pluginSchema, version: "0.1.0" });
+          expectFields("gitcode plugin manifest", manifest, { $schema: pluginSchema, version: "0.2.0" });
           const openai = manifest.extensions?.["com.openai"];
           expectFields("gitcode OpenAI extension", openai, { requires_local_executor: true });
           expectFields("gitcode interface", openai?.interface, { displayName: "GitCode", category: "Developer Tools" });

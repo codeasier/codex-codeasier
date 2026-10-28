@@ -117,7 +117,7 @@ If this marketplace is already registered, reuse it. Configure `GITCODE_TOKEN` o
 
 Invoke `$gitcode-workflow` for GitCode tasks. Its MCP tools read repository data and manage issues and PRs; `gitcode_get_clone_info` returns credential-free URLs. Clone, edit, test, commit, and push in an actual coding environment with its own Git authentication. A remote MCP server does not share its filesystem or credentials with dot.
 
-For a cloud dot, use the [Secure MCP Tunnel setup](docs/gitcode/connect-dot.md) with the stdio server. A local marketplace installation does not deploy the server or register a cloud connection. The [GitCode guide](docs/gitcode/README.md) also covers the tool catalog and optional HTTP/Docker deployment.
+For a cloud dot, deploy the [public HTTPS server with GitCode OAuth](docs/gitcode/oauth.md), then [connect its Server URL in ChatGPT](docs/gitcode/connect-dot.md). Each connection authorizes its own GitCode account. A local marketplace installation does not deploy the server or register a cloud connection. The [GitCode guide](docs/gitcode/README.md) also covers the tool catalog, Docker deployment, and the optional private stdio tunnel route.
 
 ## Unsupported Workflow Plugin Features
 
