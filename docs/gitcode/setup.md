@@ -60,6 +60,16 @@ The bridge smoke checks installed Git provenance and exact package version, both
 
 This does not validate real OAuth linking, a public server's tool catalog or live API acceptance. Follow upstream [connection verification](https://github.com/codeasier/gitcode-cli/blob/main/docs/gitcode/connect-dot.md) for those checks. A local bridge result is not deployment evidence.
 
+## Real Codex client acceptance in CI
+
+The `codex-plugin-client` job uses the official [Codex CLI 0.165.0 release](https://github.com/openai/codex/releases/tag/rust-v0.165.0), pinned by release URL and SHA256. It installs the locked runtime in a fresh Python environment and uses a separate temporary `HOME` / `CODEX_HOME`, with an allowlisted environment and no account credentials.
+
+The job runs the real [`codex plugin marketplace add`, `plugin add` and `plugin list` commands](https://learn.chatgpt.com/docs/cli/reference#codex-plugin) against the checked-out marketplace. It verifies the cached installation matches the plugin files, then uses the official [app-server discovery API](https://learn.chatgpt.com/docs/app-server) from an unrelated directory to find the enabled `gitcode-workflow` skill and the plugin's 31 MCP tools. No model turn, login, OAuth flow or live GitCode operation is requested.
+
+The installed cache's unchanged `mcp.json` command is also checked through the bridge protocol smoke for 31 / 19 tool views and all 12 read-only write denials. **The 19-tool view is an installed-command check, not a Codex-client view check:** Codex does not forward arbitrary `GITCODE_*` environment variables by default, and this job does not change the plugin or add MCP configuration overrides to make it do so.
+
+The job preserves JSON installation/discovery evidence. Missing commands, required authentication, interaction, discovery errors or timeouts fail the job explicitly; there is no skip or synthetic login fallback. It does not validate the desktop UI, a real account connection or production OAuth deployment.
+
 ## Updates and removal
 
 Plugin and runtime upgrades are independent. Review the compatibility record and lock changes before reinstalling the runtime. Preserve the previous exact requirement or isolated environment for rollback; do not infer the server needs upgrading merely because the plugin was refreshed.

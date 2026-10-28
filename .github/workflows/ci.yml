@@ -76,3 +76,49 @@ jobs:
           name: gitcode-bridge-${{ matrix.python-version }}
           path: gitcode-bridge-${{ matrix.python-version }}.txt
           if-no-files-found: error
+
+  codex-plugin-client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install checksum-pinned official Codex CLI 0.165.0
+        run: |
+          set -euo pipefail
+          # Official release asset digest, not an installer or a floating latest URL:
+          # https://github.com/openai/codex/releases/tag/rust-v0.165.0
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --max-time 180 \
+            https://github.com/openai/codex/releases/download/rust-v0.165.0/codex-package-x86_64-unknown-linux-musl.tar.gz \
+            --output "$RUNNER_TEMP/codex-package.tar.gz"
+          echo "e97c4463d7f146692a955d7b0e1c8cf48f97cd4d616cd45c5dcab2e8d9743316  $RUNNER_TEMP/codex-package.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/codex-client"
+          tar --extract --gzip --file "$RUNNER_TEMP/codex-package.tar.gz" --directory "$RUNNER_TEMP/codex-client"
+      - name: Install exact upstream runtime into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/gitcode-client"
+          requirement="$(node scripts/gitcode-runtime.mjs)"
+          "$RUNNER_TEMP/gitcode-client/bin/python" -m pip install "$requirement"
+      - name: Verify real Codex installation and discovery without credentials
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/gitcode-client/bin:$PATH"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gitcode-client/bin/python" -I "$GITHUB_WORKSPACE/scripts/smoke-codex-plugin.py" \
+            --root "$GITHUB_WORKSPACE" \
+            --codex "$RUNNER_TEMP/codex-client/bin/codex" \
+            --evidence "$RUNNER_TEMP/codex-plugin-acceptance.json"
+      - name: Preserve real-client acceptance or blocked evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-plugin-client-0.165.0
+          path: ${{ runner.temp }}/codex-plugin-acceptance.json
+          if-no-files-found: error
