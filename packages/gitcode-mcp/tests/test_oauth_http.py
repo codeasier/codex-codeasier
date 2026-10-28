@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -90,6 +91,11 @@ class Harness:
                 .removeprefix("Bearer gitcode-access-")
                 .removesuffix("-rotated")
             )
+            if "/contents/" in request.url.path and request.method in {"POST", "PUT", "DELETE"}:
+                return httpx.Response(
+                    200,
+                    json={"commit": {"sha": "a" * 40}, "content": {"sha": "b" * 40}},
+                )
             return httpx.Response(200, json={"id": user, "full_name": "allowed/repo"})
 
         self.upstream = GitCodeOAuthUpstream(
@@ -271,7 +277,7 @@ def test_complete_http_oauth_and_mcp_flow(harness):
     )
     assert notified.status_code == 202
     tools = rpc(client, tokens["access_token"]).json()["result"]["tools"]
-    assert len(tools) == 28
+    assert len(tools) == 31
     assert all(tool["_meta"]["securitySchemes"][0]["type"] == "oauth2" for tool in tools)
     result = repository(client, tokens["access_token"])
     assert result.json()["result"]["structuredContent"]["data"]["id"] == "user-a"
@@ -354,7 +360,7 @@ def test_two_accounts_and_read_write_scopes_are_isolated_under_concurrency(harne
     alice = connect(harness, "user-a")
     bob = connect(harness, "user-b", scope="gitcode:read")
     assert len(rpc(harness.client, bob["access_token"]).json()["result"]["tools"]) == 19
-    assert len(rpc(harness.client, alice["access_token"]).json()["result"]["tools"]) == 28
+    assert len(rpc(harness.client, alice["access_token"]).json()["result"]["tools"]) == 31
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(
             pool.map(
@@ -389,6 +395,118 @@ def test_two_accounts_and_read_write_scopes_are_isolated_under_concurrency(harne
     assert outside.json()["result"]["isError"]
     assert len(harness.api_requests) == before
     assert rpc(harness.client, "fallback-PAT-must-never-be-used").status_code == 401
+
+
+def test_file_publication_uses_each_oauth_identity_and_enforces_scope_and_allowlist(harness):
+    alice = connect(harness, "writer-a")
+    bob = connect(harness, "writer-b")
+    reader = connect(harness, "reader", scope="gitcode:read")
+    arguments = {
+        "owner": "allowed",
+        "repo": "repo",
+        "path": "src/example.py",
+        "branch": "feat/oauth-publication",
+        "message": "Publish the requested code change",
+        "content": "print('hello')\n",
+    }
+    catalog = rpc(harness.client, alice["access_token"]).json()["result"]["tools"]
+    file_tools = {
+        tool["name"]: tool
+        for tool in catalog
+        if tool["name"] in {"gitcode_create_file", "gitcode_update_file", "gitcode_delete_file"}
+    }
+    assert len(file_tools) == 3
+    for tool in file_tools.values():
+        assert tool["_meta"]["securitySchemes"] == [
+            {"type": "oauth2", "scopes": ["gitcode:read", "gitcode:write"]}
+        ]
+        assert not tool["annotations"]["readOnlyHint"]
+        assert not tool["annotations"]["idempotentHint"]
+    for identity in (alice, bob):
+        response = rpc(
+            harness.client,
+            identity["access_token"],
+            "tools/call",
+            {"name": "gitcode_create_file", "arguments": arguments},
+        )
+        result = response.json()["result"]
+        assert not result.get("isError")
+        assert result["structuredContent"]["data"]["commit_sha"] == "a" * 40
+        assert "gitcode-access-" not in response.text
+    assert [request.headers["authorization"] for request in harness.api_requests] == [
+        "Bearer gitcode-access-writer-a",
+        "Bearer gitcode-access-writer-b",
+    ]
+    before = len(harness.api_requests)
+    for tool in file_tools:
+        payload = dict(arguments)
+        if tool != "gitcode_create_file":
+            payload["sha"] = "c" * 40
+        if tool == "gitcode_delete_file":
+            payload.pop("content")
+        denied = rpc(
+            harness.client,
+            reader["access_token"],
+            "tools/call",
+            {"name": tool, "arguments": payload},
+        )
+        assert denied.json()["result"]["isError"]
+        outside = rpc(
+            harness.client,
+            alice["access_token"],
+            "tools/call",
+            {"name": tool, "arguments": {**payload, "owner": "outside"}},
+        )
+        assert outside.json()["result"]["isError"]
+    assert len(harness.api_requests) == before
+
+
+def test_file_publication_http_budget_accepts_escaped_limit_and_rejects_oversized_body(harness):
+    tokens = connect(harness)
+    # A valid maximum-size text file may occupy six times its size in JSON.
+    content = "\x01" * (256 * 1024)
+    arguments = {
+        "owner": "allowed",
+        "repo": "repo",
+        "path": "data/control.txt",
+        "branch": "feat/body-budget",
+        "message": "Add a bounded file",
+        "content": content,
+    }
+    assert len(json.dumps(arguments).encode()) > 1_048_576
+    response = rpc(
+        harness.client,
+        tokens["access_token"],
+        "tools/call",
+        {"name": "gitcode_create_file", "arguments": arguments},
+    )
+    assert response.status_code == 200
+    assert not response.json()["result"].get("isError")
+    assert len(harness.api_requests) == 1
+    payload = json.loads(harness.api_requests[0].content)
+    assert base64.b64decode(payload["content"]) == content.encode()
+    oversized = rpc(
+        harness.client,
+        tokens["access_token"],
+        "tools/call",
+        {"name": "gitcode_create_file", "arguments": {**arguments, "content": "a" * 2_097_152}},
+    )
+    assert oversized.status_code == 413
+    assert len(harness.api_requests) == 1
+
+
+@pytest.mark.parametrize("scope", ["gitcode:read", "gitcode:read gitcode:write"])
+def test_consent_describes_file_publication_only_for_write_scope(harness, scope):
+    state = begin(harness.client, scope=scope)
+    response = harness.client.get(
+        "/oauth/gitcode/callback", params={"state": state, "code": "user-a"}
+    )
+    page = harness.client.get(response.headers["location"])
+    assert page.status_code == 200
+    assert ("publish code commits" in page.text) == ("gitcode:write" in scope)
+    assert ("create, replace and delete repository files" in page.text) == (
+        "gitcode:write" in scope
+    )
 
 
 def test_refresh_rotation_replay_and_revocation(harness):

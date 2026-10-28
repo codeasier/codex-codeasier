@@ -1,6 +1,6 @@
 ---
 name: gitcode-workflow
-description: Read GitCode repositories and manage GitCode issues and pull requests through the GitCode MCP tools. Use for GitCode URLs, repository investigations, issue fixes, PR review, and requests to clone GitCode code into an available coding environment.
+description: Read GitCode repositories, publish file changes, and manage GitCode issues and pull requests through the GitCode MCP tools. Use for GitCode URLs, repository investigations, issue fixes, code publishing, PR review, and requests to clone GitCode code into an available coding environment.
 ---
 
 # GitCode workflow
@@ -19,16 +19,32 @@ description: Read GitCode repositories and manage GitCode issues and pull reques
 - For a review, connect findings to the actual diff, file, and commit. Publish a review comment only when the user requested publication or authorized that workflow.
 - Before retrying a timed-out create, comment, merge, or approval call, re-read the remote state to determine whether it already succeeded. Avoid duplicate issues, comments, and PRs.
 
-## Change code and create a PR
+## Choose a code publishing route
 
-1. Read the issue, repository metadata, and intended base branch. Call `gitcode_get_clone_info` for credential-free clone URLs and the default branch. This tool does not clone anything.
-2. Select the actual coding environment: the current shell, a connected computer, or an explicitly prepared cloud coding environment. Confirm it has Git, the `gitcode-clone` helper if used, and its own authorized GitCode access. A remote MCP server's filesystem and credentials are not shared with that shell.
-3. In that environment, reuse a suitable checkout or create one with `gitcode-clone OWNER/REPO DESTINATION`, optionally `--branch BRANCH`, `--depth N`, or `--ssh`. Create the destination's parent first. HTTPS with `GITCODE_TOKEN`/`GC_TOKEN` selects temporary askpass and requires the actual `GITCODE_USERNAME`; do not guess a generic username. To use an existing credential helper, omit those token variables from the clone subprocess. Native `git clone` with an existing credential helper or SSH setup is also valid. Do not put a PAT in a URL, command argument, tool result, repository file, or log. Do not fetch credentials from the MCP service to make cloning work.
-4. Create a scoped branch or isolated worktree; read repository instructions; edit and run the project's relevant checks. Record the base commit, changes, and test outcome. Do not claim tests passed unless they ran successfully.
-5. Review the diff and commit the intended changes. Push from that same environment using its configured Git credentials. The clone helper does not persist a PAT for later pushes; use the environment's existing credential helper or SSH setup. Confirm the remote branch and commit before creating the PR.
-6. Call `gitcode_create_pull_request` with the verified source and target branches. Summarize the problem, resulting behavior, validation, and limitations. Report the returned PR URL and commit. Merge only when that action is authorized and the repository's requirements are satisfied.
+Use the file tools to create, replace or delete individual files on a remote branch. These API writes use the MCP connection's GitCode authorization; do not require additional shell credentials for them. For a single commit containing multiple files, prepared local history, or native clone/pull/push, use an actual Git execution environment. Run project checks in an execution environment; the MCP server does not execute commands or tests.
 
-If a suitable coding environment is unavailable, finish the authorized API investigation and report the exact missing capability. Do not claim that `gitcode_get_clone_info`, installing this skill, or receiving a server-side path created a checkout in dot's workspace.
+### Publish files through MCP
+
+1. Read the issue, repository metadata, intended base branch, applicable repository instructions, relevant code and tests. Record the base commit. Create a scoped remote work branch with `gitcode_create_branch`, using that commit as `refs`.
+2. Read existing files from the work branch with `gitcode_get_file_contents`. Retain their current 40-character hexadecimal Blob SHAs for update/delete; never substitute a branch commit SHA. Check that a new file's path is available.
+3. Prepare complete file contents and review the changes. Run relevant checks in an available coding environment and record the outcome; disclose checks that could not run. Do not claim tests passed because an API write succeeded.
+4. Call `gitcode_create_file`, `gitcode_update_file` or `gitcode_delete_file` with explicit `owner`, `repo`, `path`, `branch` and `message`. Create/update take `content` and optional `encoding` (`utf-8` by default, or `base64`); decoded content is limited to 256 KiB. Update/delete require the current file's `sha`. Commit messages are limited to 4,096 UTF-8 bytes. Update replaces the complete file.
+5. Publish files sequentially and record each response. Each tool call creates a separate commit; do not promise atomic multi-file publication, a branch-head lock or automatic rollback. Stop on a failed or uncertain call, including an error with `operation_may_have_completed: true`, inspect remote state, and report confirmed earlier writes before deciding how to continue. Do not automatically retry. Reconcile a changed file before retrying with a newly read SHA; do not overwrite concurrent edits with stale content.
+6. Check returned `commit_sha` and `content_sha`; either may be `null`. If `verification_required` is true or the outcome is uncertain, re-read the target branch and affected paths. Do not invent a commit ID, attribute a later branch HEAD to this call without evidence, or repeat a write solely to obtain a missing SHA.
+7. Verify the remote changes before creating the PR as described below. If the file tools are absent, inspect the actual tool catalog and authorization; do not work around a read-only grant or silently switch identities.
+
+### Use native Git when needed
+
+1. Call `gitcode_get_clone_info` for credential-free URLs and the default branch. Select the actual coding environment: the current shell, a connected computer, or an explicitly prepared cloud environment. Confirm it has Git and its own authorized GitCode access. A remote MCP server's filesystem and credentials are not shared with that shell.
+2. Reuse a suitable checkout or run `gitcode-clone OWNER/REPO DESTINATION`, optionally `--branch BRANCH`, `--depth N`, or `--ssh`. Create the destination's parent first. HTTPS with `GITCODE_TOKEN`/`GC_TOKEN` selects temporary askpass and requires the actual `GITCODE_USERNAME`. Omit those token variables to use an existing credential helper. Native `git clone` with existing credentials or SSH is also valid. Do not put tokens in URLs, arguments, results, repository files or logs, or request tokens from the MCP service.
+3. Create a scoped branch or isolated worktree, read applicable instructions, edit and run relevant checks. Record the base commit, changes and actual test results.
+4. Review the diff, commit and push using that environment's Git credentials. The clone helper does not persist a PAT for later pushes. Confirm the remote branch and commit before creating the PR.
+
+If a required execution environment is unavailable, continue authorized API work that can be completed and report the exact missing capability. Do not claim that clone metadata, this skill or a server-side path created a checkout in dot's workspace.
+
+### Create the PR
+
+Call `gitcode_create_pull_request` with the verified source and target branches. Summarize the problem, resulting behavior, checks actually run and limitations, including any incomplete publication. Report the returned PR URL and verified commit information. Merge only when authorized and the repository's requirements are satisfied.
 
 ## Report results
 

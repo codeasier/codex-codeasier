@@ -2,6 +2,8 @@
 
 Use the live tool schemas as the authority for optional fields. All tools are namespaced with `gitcode_`, use explicit `owner` and `repo` arguments, and enforce the server's repository allowlist. Issue tools use `issue_number`; PR tools use `pull_number`.
 
+The complete catalog has **31 tools: 19 reads and 12 writes**. Read-only mode, or an OAuth grant without `gitcode:write`, exposes only the 19 read tools.
+
 In OAuth mode, each tool call uses the GitCode authorization belonging to that MCP connection. It cannot fall back to a shared PAT. The configured repository allowlist still applies, and reads require the grant's `gitcode:read` scope.
 
 ## Repository reads
@@ -45,6 +47,9 @@ These operations require server write mode, sufficient GitCode permissions, and 
 | Tool | Effect |
 | --- | --- |
 | `gitcode_create_branch` | Create a remote branch |
+| `gitcode_create_file` | Create one file and commit it to an explicit remote branch |
+| `gitcode_update_file` | Replace one file and commit it, supplying the current file Blob SHA |
+| `gitcode_delete_file` | Delete one file and commit it, supplying the current file Blob SHA |
 | `gitcode_create_issue` | Create an issue |
 | `gitcode_update_issue` | Update an issue |
 | `gitcode_add_issue_comment` | Add an issue comment |
@@ -53,6 +58,14 @@ These operations require server write mode, sufficient GitCode permissions, and 
 | `gitcode_add_pull_request_comment` | Add a PR comment |
 | `gitcode_approve_pull_request` | Approve a PR |
 | `gitcode_merge_pull_request` | Merge a PR |
+
+### File publishing parameters and results
+
+All three file tools require `owner`, `repo`, `path`, `branch` and `message`. The branch must already exist; use `gitcode_create_branch` when starting a work branch. Create and update also require `content`, with `encoding: "utf-8"` by default or `"base64"` for explicitly encoded data. Update replaces the entire file. Update and delete require `sha`, the current file's 40-character hexadecimal **Blob SHA**, not the branch's commit SHA.
+
+Decoded file content is limited to **256 KiB (262,144 bytes)**. Commit messages are limited to **4,096 UTF-8 bytes**. MCP HTTP requests are limited to **2 MiB** to accommodate JSON escaping; OAuth forms retain their separate 16 KiB limit. The server encodes content for GitCode and sends one Contents API write per tool call. Each write is a separate commit. The tools do not provide a multi-file transaction, branch-head compare-and-swap, force update or automatic rollback. Do not parallelize writes to the same branch.
+
+The result's `data` identifies the operation, explicit branch and path, and reports `status: "accepted"`. It contains `commit_sha` and `content_sha` only when supplied by the upstream response; either can be `null`. When the commit SHA is absent, `verification_required` is `true`: read the target branch and file state to verify the change. A later branch HEAD is an observation, not proof that it is the commit created by this call. Do not repeat a write merely to obtain a missing SHA. Errors marked `operation_may_have_completed: true` also require remote inspection before any retry. See [code publishing](code-publishing.md) for the complete workflow and handling partial completion.
 
 ## Pagination and results
 
@@ -75,4 +88,4 @@ The PR update API documents `state` as a string without an enum. This release us
 
 ## Deliberate execution boundary
 
-There is no server-side shell, arbitrary command execution, workspace mounting, code-editing tool, or remote checkout worker in this release. Use Git in the actual coding environment for clone, edit, test, commit, and push. `gitcode_create_branch` creates a GitCode branch; it does not create or switch a branch in any local working tree.
+The file tools publish changes through GitCode's API using the connection's authorization. They do not execute a shell, mount a workspace, create a checkout, run project tests or export tokens. Use the actual coding environment for native clone, fetch, pull, commit and push, and for running checks. `gitcode_get_clone_info` returns URLs only. `gitcode_create_branch` creates a GitCode branch; it does not create or switch a branch in any local working tree.

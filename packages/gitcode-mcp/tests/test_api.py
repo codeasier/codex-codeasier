@@ -60,6 +60,10 @@ def test_http_errors_are_safe_and_writes_are_not_retried(status, code):
     assert raised.value.status_code == status
     assert SECRET not in str(raised.value)
     assert SECRET not in json.dumps(raised.value.to_dict())
+    if status == 500:
+        assert raised.value.to_dict()["operation_may_have_completed"] is True
+    else:
+        assert "operation_may_have_completed" not in raised.value.to_dict()
     if status == 429:
         assert raised.value.retry_after == 27
 
@@ -183,3 +187,96 @@ def test_page_does_not_fetch_or_claim_an_unseen_page():
 def test_overfull_page_is_rejected_rather_than_silently_sliced():
     with pytest.raises(GitCodeError):
         GitCodeAPI.page_result([1, 2, 3], page=1, per_page=2)
+
+
+@pytest.mark.parametrize("method", ["POST", "GET"])
+@pytest.mark.parametrize(
+    ("outcome", "expected_code"),
+    [
+        ("timeout", "timeout"),
+        ("connection_error", "network_error"),
+        ("redirect", "upstream_redirect"),
+        ("server_error", "upstream_error"),
+        ("unavailable", "upstream_error"),
+        ("invalid_json", "invalid_response"),
+        ("invalid_unicode_json", "invalid_response"),
+        ("invalid_unicode_text", "invalid_response"),
+        ("oversized", "response_too_large"),
+    ],
+)
+def test_uncertain_outcomes_are_reported_only_for_writes_without_retrying(
+    method, outcome, expected_code
+):
+    requests = []
+    file_content = "private-file-content-never-return-in-errors"
+    reflected = f"{SECRET} {file_content}"
+
+    def handler(request):
+        requests.append(request)
+        if outcome == "timeout":
+            raise httpx.ReadTimeout(reflected, request=request)
+        if outcome == "connection_error":
+            raise httpx.ConnectError(reflected, request=request)
+        if outcome == "redirect":
+            return httpx.Response(302, headers={"Location": f"https://other.example/{SECRET}"})
+        if outcome in {"server_error", "unavailable"}:
+            return httpx.Response(
+                500 if outcome == "server_error" else 503, json={"message": reflected}
+            )
+        if outcome == "invalid_json":
+            return httpx.Response(201, content=reflected)
+        if outcome.startswith("invalid_unicode"):
+            return httpx.Response(201, content=b"\xff" + reflected.encode())
+        assert outcome == "oversized"
+        return httpx.Response(201, content=(reflected * 10).encode())
+
+    with GitCodeAPI(SECRET, max_response_bytes=128, transport=httpx.MockTransport(handler)) as api:
+        with pytest.raises(GitCodeError) as raised:
+            api.request(
+                method,
+                "/repos/team/repo/contents/file.txt",
+                json={"content": file_content} if method == "POST" else None,
+                response_format="text" if outcome == "invalid_unicode_text" else "json",
+            )
+
+    assert len(requests) == 1
+    assert requests[0].headers["Authorization"] == f"Bearer {SECRET}"
+    error = raised.value
+    assert error.code == expected_code
+    serialized = json.dumps(error.to_dict())
+    assert SECRET not in serialized
+    assert file_content not in serialized
+    assert SECRET not in str(error)
+    assert file_content not in str(error)
+    if method == "POST":
+        assert error.to_dict()["operation_may_have_completed"] is True
+        assert "write may have completed" in error.message
+        assert "Verify remote state" in error.message
+        assert "do not automatically retry" in error.message
+    else:
+        assert "operation_may_have_completed" not in error.to_dict()
+        assert "write may have completed" not in error.message
+
+
+@pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE", "post"])
+def test_all_mutation_methods_report_uncertain_server_outcomes(method):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(502, json={"message": SECRET})
+
+    with GitCodeAPI(SECRET, transport=httpx.MockTransport(handler)) as api:
+        with pytest.raises(GitCodeError) as raised:
+            api.request(method, "/repos/team/repo/contents/file.txt")
+
+    assert len(requests) == 1
+    assert raised.value.code == "upstream_error"
+    assert raised.value.status_code == 502
+    assert raised.value.operation_may_have_completed is True
+    assert SECRET not in str(raised.value)
+
+
+def test_legacy_error_payload_does_not_gain_outcome_metadata():
+    error = GitCodeError("invalid_arguments", "Invalid input.")
+    assert error.to_dict() == {"code": "invalid_arguments", "message": "Invalid input."}

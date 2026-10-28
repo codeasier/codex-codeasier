@@ -11,6 +11,16 @@ from mcp.types import Tool, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .api import GitCodeAPI, GitCodeError, segment
+from .file_writes import (
+    FILE_WRITE_METHODS,
+    MAX_ENCODED_FILE_CHARS,
+    MAX_MESSAGE_BYTES,
+    encode_file_content,
+    utf8_bytes,
+    validate_commit_message,
+    validate_write_branch,
+    write_file,
+)
 
 PositiveNumber = Annotated[int, Field(ge=1)]
 Name = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")]
@@ -18,6 +28,7 @@ Text = Annotated[str, Field(max_length=65_536)]
 Title = Annotated[str, Field(min_length=1, max_length=1024)]
 Reference = Annotated[str, Field(min_length=1, max_length=1024)]
 Labels = Annotated[list[Annotated[str, Field(min_length=1, max_length=100)]], Field(max_length=100)]
+BlobSHA = Annotated[str, Field(min_length=40, max_length=40, pattern=r"^[0-9a-fA-F]{40}$")]
 
 
 def _safe_reference(value: str) -> str:
@@ -134,6 +145,70 @@ class CreateBranchArgs(RepoArgs):
     @classmethod
     def validate_ref(cls, value: str) -> str:
         return _safe_reference(value)
+
+
+class FileWriteArgs(RepoArgs):
+    path: Annotated[str, Field(min_length=1, max_length=4096)] = Field(
+        description="Relative repository file path, not a local filesystem path."
+    )
+    branch: Reference = Field(
+        description="Explicit existing short branch name. Never defaults to the default branch."
+    )
+    message: Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_BYTES)] = Field(
+        description="Nonblank commit message, at most 4096 UTF-8 bytes."
+    )
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        utf8_bytes(value, maximum=4096)
+        return _safe_file_path(value)
+
+    @field_validator("branch")
+    @classmethod
+    def validate_branch(cls, value: str) -> str:
+        return validate_write_branch(value)
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        return validate_commit_message(value)
+
+
+class CreateFileArgs(FileWriteArgs):
+    content: Annotated[str, Field(max_length=MAX_ENCODED_FILE_CHARS)] = Field(
+        description="Complete file content; at most 256 KiB of decoded bytes. Empty files are allowed."
+    )
+    encoding: Literal["utf-8", "base64"] = Field(
+        default="utf-8", description="UTF-8 text or canonical, padded Base64 without whitespace."
+    )
+
+    @model_validator(mode="after")
+    def validate_content(self) -> CreateFileArgs:
+        encode_file_content(self.content, self.encoding)
+        return self
+
+
+class UpdateFileArgs(CreateFileArgs):
+    sha: BlobSHA = Field(
+        description="Existing file Blob SHA from get_file_contents at this branch; not a commit SHA."
+    )
+
+    @field_validator("sha")
+    @classmethod
+    def normalize_sha(cls, value: str) -> str:
+        return value.lower()
+
+
+class DeleteFileArgs(FileWriteArgs):
+    sha: BlobSHA = Field(
+        description="Existing file Blob SHA from get_file_contents at this branch; not a commit SHA."
+    )
+
+    @field_validator("sha")
+    @classmethod
+    def normalize_sha(cls, value: str) -> str:
+        return value.lower()
 
 
 class ListIssuesArgs(PageArgs):
@@ -310,6 +385,26 @@ SPECS = (
         False,
     ),
     ToolSpec(
+        "create_file",
+        "Create a file and publish one commit on an explicit existing GitCode branch. Accepts UTF-8 or Base64, up to 256 KiB decoded. Use update_file for existing files. No automatic retries or multi-file atomicity.",
+        CreateFileArgs,
+        False,
+    ),
+    ToolSpec(
+        "update_file",
+        "Replace a file and publish one commit. First read it at the target branch and supply its Blob SHA. Up to 256 KiB decoded; no force, automatic retry, or branch-head CAS guarantee.",
+        UpdateFileArgs,
+        False,
+        True,
+    ),
+    ToolSpec(
+        "delete_file",
+        "Delete a file and publish one commit on an explicit branch. Requires the file's current Blob SHA from that branch. No force, automatic retry, or multi-file rollback.",
+        DeleteFileArgs,
+        False,
+        True,
+    ),
+    ToolSpec(
         "list_issues",
         "Read one page of GitCode issues, with state, labels, or text filters.",
         ListIssuesArgs,
@@ -374,7 +469,7 @@ SPECS = (
     ),
     ToolSpec(
         "create_pull_request",
-        "Create a PR; use fork_path for forks. GitCode assignees are reviewers. Source branch must already be pushed.",
+        "Create a PR; use fork_path for forks. GitCode assignees are reviewers. Verify source changes already exist remotely, through file tools or Git push.",
         CreatePullArgs,
         False,
     ),
@@ -535,6 +630,8 @@ class GitCodeTools:
             return self.api.get(f"{prefix}/commits/{segment(data['sha'])}")
         if action == "create_branch":
             return self.api.post(f"{prefix}/branches", json=data)
+        if action in FILE_WRITE_METHODS:
+            return write_file(self.api, prefix, action, data)
         if action == "list_issues":
             items = self.api.issues.list(owner, repo, **data)
             return self.api.page_result(items, page=data["page"], per_page=data["per_page"])

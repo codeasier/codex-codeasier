@@ -47,17 +47,27 @@ In a new conversation, select the installed plugin with `@` and ask:
 
 Inspect the actual tool calls and results. Confirm the intended repository and branch, and that clone URLs contain no credentials. A running container, successful HTTPS GET, local stdio smoke test or mocked OAuth test does not establish this ChatGPT connection.
 
-Keep acceptance read-only. To use the Issue/PR management workflow, enable server write mode, refresh the plugin's tools, then reconnect or repeat OAuth authorization to obtain `gitcode:write`. Refreshing tools or an existing token does not elevate a read-only grant. GitCode account permissions, branch protections and ChatGPT's action approvals continue to apply.
+Keep initial acceptance read-only. To publish files or manage Issues/PRs, enable server write mode and refresh the plugin's tools. If the existing grant is read-only, reconnect or repeat OAuth authorization to obtain `gitcode:write`; refreshing tools or an existing token does not elevate it. An existing write grant also covers the file publishing tools and does not need a new authorization solely because these tools were added. GitCode account permissions, branch protections and ChatGPT's action approvals continue to apply.
 
 After changing runtime settings or tool definitions, restart the service, refresh its metadata in ChatGPT and repeat the affected check. Reconnect when the authorization grant expires. See [OAuth operation and lifetimes](oauth.md#4-configure-persistent-state-and-access).
 
-## 4. Give code work an execution environment
+## 4. Publish code and create a PR
 
-For a code fix, have dot read the issue and call `gitcode_get_clone_info`, then clone, edit, test and push in the actual coding environment. Configure that environment's Git credential helper or SSH identity separately.
+Use the [code publishing workflow](code-publishing.md) to create a scoped remote branch, read repository instructions and current files, prepare the change, run available checks, publish files and create a PR. `gitcode_create_file`, `gitcode_update_file` and `gitcode_delete_file` use the existing OAuth connection; no additional Git credentials are needed for these API calls.
+
+Each file write produces a separate commit. Multiple files are published sequentially, not as an atomic batch. Verify returned commit/file identifiers and remote state before opening the PR; stop on an uncertain result instead of automatically retrying.
+
+For native clone, local Git history, commit or push, call `gitcode_get_clone_info` and work in the actual coding environment with its own Git credential helper or SSH identity. The MCP server does not run project tests or execute shell commands.
 
 The MCP service does not expose its tokens or filesystem. A checkout on the MCP host is not automatically visible to dot's shell. A cloud-only custom MCP connection discovers tools but does not automatically install the local `gitcode-workflow` skill.
 
 OpenAI's [dot task documentation](https://learn.chatgpt.com/docs/dots/tasks-and-memory) explains delegation and environment boundaries.
+
+## 5. Upgrade an existing connection
+
+Update the deployed checkout, rebuild or reinstall the runtime, then recreate/restart the service as described in [deployment](deployment.md#operate-and-upgrade). Preserve the OAuth database and encryption key. Refresh the plugin's tools in ChatGPT after the new service is running.
+
+A writable connection should now expose 31 tools, including the three file tools; a read-only connection still exposes 19. Existing `gitcode:write` grants do not need reauthorization merely for this upgrade. Reauthorize if a read-only grant needs write scope, the grant has expired, or the GitCode authorization no longer grants the required upstream permissions.
 
 ## Other connection routes
 

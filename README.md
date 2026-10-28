@@ -5,7 +5,7 @@ Repository workflows and service integrations distributed through a Codex market
 | Plugin | Purpose | Runtime |
 | --- | --- | --- |
 | `codex-codeasier` | Evidence-driven issue, PR, specification, and worktree workflows | Git and authenticated GitHub CLI |
-| `gitcode` | GitCode repository, issue, and PR tools plus a coding workflow | Python 3.11+ and the separately installed GitCode MCP package |
+| `gitcode` | GitCode repository reads, file publishing, issue and PR tools plus a coding workflow | Python 3.11+ and the separately installed GitCode MCP package |
 
 ## Workflow Plugin Requirements
 
@@ -115,7 +115,9 @@ codex plugin add gitcode@codex-codeasier
 
 If this marketplace is already registered, reuse it. Configure `GITCODE_TOKEN` or `GC_TOKEN` through the host's secret mechanism before starting the plugin. Use `GITCODE_MCP_ALLOWED_REPOS` to restrict repositories and `GITCODE_MCP_READ_ONLY=true` for read-only operation. See the [GitCode setup guide](docs/gitcode/setup.md) for a pip alternative, credentials, smoke checks, and updates.
 
-Invoke `$gitcode-workflow` for GitCode tasks. Its MCP tools read repository data and manage issues and PRs; `gitcode_get_clone_info` returns credential-free URLs. Clone, edit, test, commit, and push in an actual coding environment with its own Git authentication. A remote MCP server does not share its filesystem or credentials with dot.
+Invoke `$gitcode-workflow` for GitCode tasks. Its 31 MCP tools read repository data, publish individual file changes to a remote branch, and manage issues and PRs. The [code publishing guide](docs/gitcode/code-publishing.md) covers creating a work branch, reading existing files, publishing changes and opening a PR. Each file write produces its own commit; multiple file writes are sequential, not one atomic commit.
+
+API publishing uses the MCP connection's existing GitCode authorization and does not require Git credentials in dot's shell. For native clone, local development, tests, commit and push, use an actual coding environment with its own Git authentication. `gitcode_get_clone_info` returns credential-free URLs only; the remote MCP server does not share its filesystem or credentials with dot.
 
 For a cloud dot, deploy the [public HTTPS server with GitCode OAuth](docs/gitcode/oauth.md), then [connect its Server URL in ChatGPT](docs/gitcode/connect-dot.md). Each connection authorizes its own GitCode account. A local marketplace installation does not deploy the server or register a cloud connection. The [GitCode guide](docs/gitcode/README.md) also covers the tool catalog, Docker deployment, and the optional private stdio tunnel route.
 

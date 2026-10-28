@@ -24,12 +24,19 @@ class GitCodeError(Exception):
         *,
         status_code: int | None = None,
         retry_after: int | None = None,
+        operation_may_have_completed: bool | None = None,
     ) -> None:
+        if operation_may_have_completed:
+            message += (
+                " The write may have completed. Verify remote state before retrying;"
+                " do not automatically retry this operation."
+            )
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
         self.retry_after = retry_after
+        self.operation_may_have_completed = operation_may_have_completed
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"code": self.code, "message": self.message}
@@ -37,6 +44,8 @@ class GitCodeError(Exception):
             result["status_code"] = self.status_code
         if self.retry_after is not None:
             result["retry_after"] = self.retry_after
+        if self.operation_may_have_completed is not None:
+            result["operation_may_have_completed"] = self.operation_may_have_completed
         return result
 
 
@@ -106,7 +115,7 @@ class GitCodeAPI(GitCodeClient):
         return value
 
     @staticmethod
-    def _status_error(response: httpx.Response) -> GitCodeError:
+    def _status_error(response: httpx.Response, *, mutation: bool = False) -> GitCodeError:
         status = response.status_code
         errors = {
             401: ("authentication_failed", "GitCode rejected the configured credential."),
@@ -132,7 +141,13 @@ class GitCodeAPI(GitCodeClient):
         header = response.headers.get("Retry-After", "")
         if status == 429 and header.isascii() and header.isdigit() and len(header) <= 6:
             retry_after = min(int(header), 86400)
-        return GitCodeError(code, message, status_code=status, retry_after=retry_after)
+        return GitCodeError(
+            code,
+            message,
+            status_code=status,
+            retry_after=retry_after,
+            operation_may_have_completed=True if mutation and 500 <= status < 600 else None,
+        )
 
     def request(
         self,
@@ -145,6 +160,7 @@ class GitCodeAPI(GitCodeClient):
         response_format: Literal["json", "text"] = "json",
     ) -> Any:
         """Issue a bounded request using pygitcode's public request signature."""
+        mutation = method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
         if not self.token:
             raise GitCodeError(
                 "configuration_error", "Set GITCODE_TOKEN or GC_TOKEN before calling GitCode tools."
@@ -176,9 +192,10 @@ class GitCodeAPI(GitCodeClient):
                         "upstream_redirect",
                         "GitCode returned a redirect; credentials were not forwarded.",
                         status_code=response.status_code,
+                        operation_may_have_completed=True if mutation else None,
                     )
                 if response.status_code >= 400:
-                    raise self._status_error(response)
+                    raise self._status_error(response, mutation=mutation)
                 content = bytearray()
                 for chunk in response.iter_bytes(
                     chunk_size=min(65_536, self.max_response_bytes + 1)
@@ -187,17 +204,24 @@ class GitCodeAPI(GitCodeClient):
                     if len(content) > self.max_response_bytes:
                         raise GitCodeError(
                             "response_too_large",
-                            "GitCode's response exceeds the configured size limit; request a smaller page or file. For unpaged PR data, use git diff in a local checkout.",
+                            (
+                                "GitCode's write response exceeds the configured size limit."
+                                if mutation
+                                else "GitCode's response exceeds the configured size limit; request a smaller page or file. For unpaged PR data, use git diff in a local checkout."
+                            ),
+                            operation_may_have_completed=True if mutation else None,
                         )
         except httpx.TimeoutException:
             raise GitCodeError(
                 "timeout",
-                "GitCode did not respond in time. A write may have completed; verify before retrying.",
+                "GitCode did not respond in time.",
+                operation_may_have_completed=True if mutation else None,
             ) from None
         except httpx.HTTPError:
             raise GitCodeError(
                 "network_error",
-                "The GitCode request failed. A write may have completed; verify before retrying.",
+                "The GitCode request failed.",
+                operation_may_have_completed=True if mutation else None,
             ) from None
         if not content:
             return None
@@ -207,7 +231,9 @@ class GitCodeAPI(GitCodeClient):
             return self._redact(json_module.loads(content))
         except (ValueError, UnicodeError):
             raise GitCodeError(
-                "invalid_response", "GitCode returned an invalid response format."
+                "invalid_response",
+                "GitCode returned an invalid response format.",
+                operation_may_have_completed=True if mutation else None,
             ) from None
 
     def page(self, path: str, *, page: int, per_page: int, **params: Any) -> dict[str, Any]:

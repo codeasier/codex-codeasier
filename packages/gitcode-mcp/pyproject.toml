@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codeasier-gitcode-mcp"
-version = "0.2.0"
-description = "GitCode repository, issue, and pull request tools for MCP clients"
+version = "0.3.0"
+description = "GitCode repository, code publishing, issue, and pull request tools for MCP clients"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
