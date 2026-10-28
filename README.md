@@ -1,8 +1,13 @@
 # codex-codeasier
 
-Evidence-driven repository workflows packaged as a native OpenAI Codex plugin and distributed through a Codex marketplace. Adapted from [codeasier/claude-codeasier](https://github.com/codeasier/claude-codeasier) through [open-codeasier](https://github.com/codeasier/open-codeasier).
+Repository workflows and service integrations distributed through a Codex marketplace. The original `codex-codeasier` workflow plugin is adapted from [codeasier/claude-codeasier](https://github.com/codeasier/claude-codeasier) through [open-codeasier](https://github.com/codeasier/open-codeasier).
 
-## Requirements
+| Plugin | Purpose | Runtime |
+| --- | --- | --- |
+| `codex-codeasier` | Evidence-driven issue, PR, specification, and worktree workflows | Git and authenticated GitHub CLI |
+| `gitcode` | GitCode repository, issue, and PR tools plus a coding workflow | Python 3.11+ and the separately installed GitCode MCP package |
+
+## Workflow Plugin Requirements
 
 - A Codex release with `codex plugin` support
 - Git
@@ -45,7 +50,7 @@ Start a new Codex thread after reinstalling to pick up updated skills.
 
 ## Uninstall
 
-Remove the installed plugin. Remove the marketplace too if no longer needed:
+Remove the installed workflow plugin. Remove the marketplace only when none of its plugins are needed:
 
 ```bash
 codex plugin remove codex-codeasier@codex-codeasier
@@ -97,16 +102,35 @@ Natural-language requests such as `Use issue-review for issue 42` also work, but
 | `understand-me` | Challenge and refine an idea through an explicit decision tree and one question at a time. |
 | `worktree-clean` | Inspect Git worktrees and remove only those proven safe to delete. |
 
-## Unsupported Workflows
+## GitCode Plugin
 
-Session review and all other session-oriented workflows are intentionally excluded. This plugin does not read, normalize, inspect, or manage Codex or OpenCode sessions.
+Install the runtime in the same environment that launches the MCP server, then install the separate plugin:
+
+```bash
+cd /absolute/path/to/codex-codeasier
+uv tool install ./packages/gitcode-mcp
+codex plugin marketplace add codeasier/codex-codeasier
+codex plugin add gitcode@codex-codeasier
+```
+
+If this marketplace is already registered, reuse it. Configure `GITCODE_TOKEN` or `GC_TOKEN` through the host's secret mechanism before starting the plugin. Use `GITCODE_MCP_ALLOWED_REPOS` to restrict repositories and `GITCODE_MCP_READ_ONLY=true` for read-only operation. See the [GitCode setup guide](docs/gitcode/setup.md) for a pip alternative, credentials, smoke checks, and updates.
+
+Invoke `$gitcode-workflow` for GitCode tasks. Its MCP tools read repository data and manage issues and PRs; `gitcode_get_clone_info` returns credential-free URLs. Clone, edit, test, commit, and push in an actual coding environment with its own Git authentication. A remote MCP server does not share its filesystem or credentials with dot.
+
+For a cloud dot, use the [Secure MCP Tunnel setup](docs/gitcode/connect-dot.md) with the stdio server. A local marketplace installation does not deploy the server or register a cloud connection. The [GitCode guide](docs/gitcode/README.md) also covers the tool catalog and optional HTTP/Docker deployment.
+
+## Unsupported Workflow Plugin Features
+
+Session review and all other session-oriented workflows are intentionally excluded from `codex-codeasier`. That plugin does not read, normalize, inspect, or manage Codex or OpenCode sessions.
 
 ## Validate
 
-The repository has no runtime dependencies. Validate the marketplace manifest, plugin manifest, exact skill set, frontmatter, and platform boundaries with Node.js 22 or newer:
+The workflow plugin has no runtime dependencies. Validate the marketplace manifests, plugin metadata, skill frontmatter, and platform boundaries with Node.js 22 or newer:
 
 ```bash
 node scripts/validate.mjs
 ```
+
+The GitCode runtime has its own Python dependencies and checks. See [GitCode setup](docs/gitcode/setup.md#smoke-checks) and the package's development instructions.
 
 MIT licensed.

@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Test marketplace validation
+        run: node --test scripts/validate.test.mjs
       - id: workflow-source
         name: Read workflow source lock
         run: |
@@ -36,3 +38,36 @@ jobs:
             --source .workflow-source/open-codeasier \
             --target .
       - run: node scripts/validate.mjs
+
+  gitcode-mcp:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: packages/gitcode-mcp/pyproject.toml
+      - name: Install package and development dependencies
+        run: python -m pip install 'packages/gitcode-mcp[dev]' build
+      - name: Check Python formatting and lint
+        run: |
+          python -m ruff check packages/gitcode-mcp
+          python -m ruff format --check packages/gitcode-mcp
+      - name: Test GitCode MCP
+        run: python -m pytest packages/gitcode-mcp/tests
+      - name: Build distributions
+        run: python -m build packages/gitcode-mcp --outdir dist
+      - name: Smoke test an isolated wheel installation
+        run: |
+          python -m venv "$RUNNER_TEMP/gitcode-wheel"
+          "$RUNNER_TEMP/gitcode-wheel/bin/python" -m pip install dist/codeasier_gitcode_mcp-*.whl
+          export PATH="$RUNNER_TEMP/gitcode-wheel/bin:$PATH"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/gitcode-wheel/bin/python" -I -m gitcode_mcp.smoke

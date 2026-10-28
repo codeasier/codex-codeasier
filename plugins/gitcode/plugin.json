@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "gitcode",
+  "version": "0.1.0",
+  "description": "GitCode repository, issue, and pull-request tools with an explicit local coding workflow.",
+  "author": {
+    "name": "Codeasier",
+    "url": "https://github.com/codeasier"
+  },
+  "homepage": "https://github.com/codeasier/codex-codeasier#gitcode-plugin",
+  "repository": "https://github.com/codeasier/codex-codeasier",
+  "license": "MIT",
+  "keywords": ["gitcode", "repositories", "issues", "pull-requests", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "GitCode",
+        "shortDescription": "Work with GitCode repositories, issues, and PRs",
+        "longDescription": "Read GitCode repositories, manage issues and pull requests, and hand code changes to an authenticated coding environment.",
+        "developerName": "Codeasier",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/codeasier/codex-codeasier",
+        "defaultPrompt": [
+          "Investigate an issue in a GitCode repository.",
+          "Resolve a GitCode issue and prepare a pull request.",
+          "Review the changes and comments on a GitCode pull request."
+        ]
+      }
+    }
+  }
+}

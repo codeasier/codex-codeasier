@@ -2,3 +2,17 @@
 *.swp
 *.swo
 .codex/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.workflow-source/
+.env
+.env.*
+!.env.example

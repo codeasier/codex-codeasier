@@ -1,0 +1,9 @@
+# Include only the package metadata and Python source needed for this image.
+**
+!packages/
+!packages/gitcode-mcp/
+!packages/gitcode-mcp/pyproject.toml
+!packages/gitcode-mcp/README.md
+!packages/gitcode-mcp/src/
+!packages/gitcode-mcp/src/gitcode_mcp/
+!packages/gitcode-mcp/src/gitcode_mcp/*.py
